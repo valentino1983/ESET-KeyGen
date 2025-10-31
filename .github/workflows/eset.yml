@@ -36,6 +36,7 @@ on:
         options:
           - --key
           - --small-business-key
+          - --advanced-key
         default: --key
       os:
         description: 'Operating System of runner (Linux, macOS, Windows)'
