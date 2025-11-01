@@ -28,7 +28,7 @@ on:
           - inboxes
           - incognitomail
           - emailfake
-        default: emailfake
+        default: 1secmail
       key_type:
         description: 'Modes of operation'
         required: true
@@ -72,7 +72,7 @@ jobs:
           else #if fallback then
             echo "account=0" >> $GITHUB_OUTPUT
             echo "key=1" >> $GITHUB_OUTPUT
-            echo "mail=emailfake" >> $GITHUB_OUTPUT
+            echo "mail=1secmail" >> $GITHUB_OUTPUT
             echo "key_type=--key" >> $GITHUB_OUTPUT
             echo "branch=main" >> $GITHUB_OUTPUT
           fi
@@ -91,11 +91,27 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
           sudo apt-get update
           sudo apt-get install -y cloudflare-warp
-          warp-cli register
+          
+          echo "Registering WARP..."
+          warp-cli registration new
+          
+          echo "Connecting to WARP..."
           warp-cli connect
-          sleep 5
-          echo "WARP connected, checking IP..."
-          curl -s https://www.cloudflare.com/cdn-cgi/trace/ | grep warp
+          sleep 15
+          
+          echo "Waiting for WARP connection..."
+          for i in {1..12}; do
+            status=$(warp-cli status)
+            echo "Status: $status"
+            if echo "$status" | grep -q "Connected"; then
+              echo "WARP is connected!"
+              break
+            fi
+            sleep 5
+          done
+          
+          echo "Checking connection..."
+          curl -s https://www.cloudflare.com/cdn-cgi/trace/ | tee /dev/stderr | grep -q "warp=on" || echo "Warning: WARP may not be fully active"
 
       - name: Setup & Run Script (Linux/macOS)
         if: runner.os != 'Windows'
@@ -134,7 +150,7 @@ jobs:
         shell: bash
         run: |
           warp-cli disconnect || true
-          warp-cli delete || true
+          warp-cli registration delete || true
 
       - name: Setup Cloudflare WARP VPN (Windows)
         if: runner.os == 'Windows'
@@ -143,12 +159,41 @@ jobs:
           Write-Host "Installing Cloudflare WARP for Windows..."
           Invoke-WebRequest -Uri "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi" -OutFile "$env:TEMP\Cloudflare_WARP.msi"
           Start-Process msiexec.exe -Wait -ArgumentList "/i $env:TEMP\Cloudflare_WARP.msi /qn"
-          Start-Sleep -Seconds 10
-          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" register
-          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" connect
-          Start-Sleep -Seconds 10
-          Write-Host "WARP connected, checking IP..."
-          Invoke-RestMethod -Uri "https://www.cloudflare.com/cdn-cgi/trace/"
+          Start-Sleep -Seconds 15
+          
+          $warpCli = "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          
+          Write-Host "Accepting WARP ToS..."
+          & $warpCli registration new
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Registration failed, trying license accept..."
+            & $warpCli registration license accept
+          }
+          
+          Write-Host "Connecting to WARP..."
+          & $warpCli connect
+          Start-Sleep -Seconds 15
+          
+          Write-Host "Waiting for WARP to be fully connected..."
+          $maxRetries = 12
+          $retryCount = 0
+          while ($retryCount -lt $maxRetries) {
+            $status = & $warpCli status
+            Write-Host "Status: $status"
+            if ($status -match "Connected") {
+              Write-Host "WARP is connected!"
+              break
+            }
+            Start-Sleep -Seconds 5
+            $retryCount++
+          }
+          
+          Write-Host "Checking connection..."
+          $trace = Invoke-RestMethod -Uri "https://www.cloudflare.com/cdn-cgi/trace/"
+          Write-Host $trace
+          if ($trace -notmatch "warp=on") {
+            Write-Warning "WARP may not be fully active, but continuing..."
+          }
 
       - name: Setup & Run Script (Windows)
         if: runner.os == 'Windows'
@@ -164,20 +209,81 @@ jobs:
           $KEY_TYPE = "${{ steps.vars.outputs.key_type }}"
 
           if ($ACCOUNT -ne 0) {
-            python main.py --auto-detect-browser --account --email-api "$MAIL" --skip-update-check --no-logo --disable-progress-bar --disable-logging --repeat $ACCOUNT
+            Write-Host "Generating $ACCOUNT account(s)..."
+            $maxRetries = 3
+            $retryCount = 0
+            $success = $false
+            
+            while ($retryCount -lt $maxRetries -and -not $success) {
+              try {
+                if ($retryCount -gt 0) {
+                  Write-Host "Retry attempt $retryCount of $maxRetries..."
+                  Start-Sleep -Seconds 30
+                }
+                python main.py --auto-detect-browser --account --email-api "$MAIL" --skip-update-check --no-logo --disable-progress-bar --disable-logging --repeat $ACCOUNT
+                $success = $true
+              } catch {
+                Write-Host "Attempt failed: $_"
+                $retryCount++
+              }
+            }
+            
             echo "Account:" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
             Get-Content -Path ./*ACCOUNTS.txt -ErrorAction SilentlyContinue | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            
+            if (-not $success) {
+              Write-Warning "Failed to generate accounts after $maxRetries attempts"
+            }
           }
 
           if ($KEY -ne 0) {
-            python main.py --auto-detect-browser "$KEY_TYPE" --email-api "$MAIL" --skip-update-check --no-logo --disable-progress-bar --disable-logging --repeat $KEY
+            Write-Host "Generating $KEY key(s)..."
+            $maxRetries = 3
+            $retryCount = 0
+            $success = $false
+            
+            while ($retryCount -lt $maxRetries -and -not $success) {
+              try {
+                if ($retryCount -gt 0) {
+                  Write-Host "Retry attempt $retryCount of $maxRetries..."
+                  Start-Sleep -Seconds 30
+                }
+                python main.py --auto-detect-browser "$KEY_TYPE" --email-api "$MAIL" --skip-update-check --no-logo --disable-progress-bar --disable-logging --repeat $KEY
+                $success = $true
+              } catch {
+                Write-Host "Attempt failed: $_"
+                $retryCount++
+              }
+            }
+            
             echo "`nKey:" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
             Get-Content -Path ./*KEYS.txt -ErrorAction SilentlyContinue | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            
+            if (-not $success) {
+              Write-Error "Failed to generate keys after $maxRetries attempts"
+              exit 1
+            }
           }
 
       - name: Cleanup WARP VPN (Windows)
         if: runner.os == 'Windows' && always()
         shell: pwsh
         run: |
-          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" disconnect
-          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" delete
+          $warpCli = "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          if (Test-Path $warpCli) {
+            Write-Host "Disconnecting WARP..."
+            & $warpCli disconnect 2>&1 | Out-Null
+            Start-Sleep -Seconds 3
+            Write-Host "Deleting WARP registration..."
+            & $warpCli registration delete 2>&1 | Out-Null
+          }
+
+      - name: Upload Generated Files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eset-keys-${{ github.run_number }}
+          path: |
+            *ACCOUNTS.txt
+            *KEYS.txt
+          if-no-files-found: ignore
