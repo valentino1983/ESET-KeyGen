@@ -54,6 +54,11 @@ on:
           - main
           - test
         default: main
+      use_vpn:
+        description: 'Enable Cloudflare WARP VPN'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   generate-account-and-key:
@@ -69,12 +74,14 @@ jobs:
             echo "mail=${{ github.event.inputs.mail }}" >> $GITHUB_OUTPUT
             echo "key_type=${{ github.event.inputs.key_type }}" >> $GITHUB_OUTPUT
             echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+            echo "use_vpn=${{ github.event.inputs.use_vpn }}" >> $GITHUB_OUTPUT
           else #if fallback then
             echo "account=0" >> $GITHUB_OUTPUT
             echo "key=1" >> $GITHUB_OUTPUT
             echo "mail=1secmail" >> $GITHUB_OUTPUT
             echo "key_type=--key" >> $GITHUB_OUTPUT
             echo "branch=main" >> $GITHUB_OUTPUT
+            echo "use_vpn=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout Repository
@@ -83,7 +90,7 @@ jobs:
           ref: ${{ steps.vars.outputs.branch }}
 
       - name: Setup Cloudflare WARP VPN
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.vars.outputs.use_vpn == 'true'
         shell: bash
         run: |
           echo "Installing Cloudflare WARP..."
@@ -146,14 +153,14 @@ jobs:
           fi
 
       - name: Cleanup WARP VPN
-        if: runner.os == 'Linux' && always()
+        if: runner.os == 'Linux' && steps.vars.outputs.use_vpn == 'true' && always()
         shell: bash
         run: |
           warp-cli disconnect || true
           warp-cli registration delete || true
 
       - name: Setup Cloudflare WARP VPN (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.vars.outputs.use_vpn == 'true'
         shell: pwsh
         run: |
           Write-Host "Installing Cloudflare WARP for Windows..."
@@ -266,7 +273,7 @@ jobs:
           }
 
       - name: Cleanup WARP VPN (Windows)
-        if: runner.os == 'Windows' && always()
+        if: runner.os == 'Windows' && steps.vars.outputs.use_vpn == 'true' && always()
         shell: pwsh
         run: |
           $warpCli = "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe"
