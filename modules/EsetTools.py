@@ -150,7 +150,12 @@ class EsetKeygen(object):
                 if skip_clicked:
                     logging.info('Onboarding skipped successfully!')
                     console_log('Onboarding skipped successfully!', OK, silent_mode=SILENT_MODE)
-                    time.sleep(2)
+                    time.sleep(3)
+                    # Wait for navigation away from onboarding page
+                    for _ in range(10):
+                        if 'onboarding' not in self.driver.current_url.lower():
+                            break
+                        time.sleep(1)
                 else:
                     # If skip button not found, try clicking "Continue" through all onboarding steps
                     logging.info('Skip button not found, will navigate through onboarding...')
@@ -162,11 +167,20 @@ class EsetKeygen(object):
                             raise_exception_if_failed=False
                         )
                         if continue_clicked:
-                            time.sleep(1)
+                            time.sleep(2)
+                            # Check if we've left onboarding
+                            if 'onboarding' not in self.driver.current_url.lower():
+                                break
                         else:
                             break
             except Exception as e:
                 logging.warning(f'Error during onboarding skip: {e}')
+            
+            # Force check if still on onboarding page after attempts
+            if 'onboarding' in self.driver.current_url.lower():
+                logging.warning('Still on onboarding page, forcing navigation to home...')
+                self.driver.get('https://home.eset.com/')
+                time.sleep(2)
         
         # Now navigate to trial page
         self.driver.get('https://home.eset.com/subscriptions/choose-trial')
