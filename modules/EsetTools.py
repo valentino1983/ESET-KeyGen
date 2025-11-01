@@ -135,76 +135,65 @@ class EsetKeygen(object):
         if 'login' in self.driver.current_url.lower():
             raise RuntimeError('Session expired or not logged in! Please ensure account is confirmed.')
         
-        # Check if we're on the onboarding page and navigate through it
+        # Check if we're on the onboarding page
         if 'onboarding' in self.driver.current_url.lower():
-            logging.info('Detected onboarding page, navigating through carousel...')
-            console_log('\nDetected onboarding page, navigating through carousel...', INFO, silent_mode=SILENT_MODE)
-            try:
-                # Click "Continue" button through all carousel slides (typically 3-4 slides)
-                # The last click should navigate away from onboarding
-                for step in range(5):  # Max 5 clicks to be safe
-                    logging.info(f'Onboarding step {step+1}/5...')
-                    
-                    # Check if we've already left onboarding
-                    if 'onboarding' not in self.driver.current_url.lower():
-                        logging.info('Left onboarding page successfully!')
-                        console_log('Onboarding completed successfully!', OK, silent_mode=SILENT_MODE)
-                        break
-                    
-                    # Try to click Continue button
-                    continue_clicked = uCE(
-                        self.driver,
-                        f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'onboarding-welcome-continue-btn'))",
-                        max_iter=10,
-                        raise_exception_if_failed=False
-                    )
-                    
-                    if continue_clicked:
-                        logging.info(f'Continue button clicked at step {step+1}')
-                        time.sleep(2)
-                        
-                        # After clicking, check URL
-                        current_url = self.driver.current_url.lower()
-                        logging.info(f'After click: URL = {current_url}')
-                        
-                        if 'onboarding' not in current_url:
-                            logging.info('Successfully navigated away from onboarding!')
-                            console_log('Onboarding completed successfully!', OK, silent_mode=SILENT_MODE)
-                            break
-                    else:
-                        logging.warning(f'Continue button not found at step {step+1}')
-                        # Try skip button as fallback
-                        skip_clicked = uCE(
-                            self.driver,
-                            f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'onboarding-welcome-skip-introduction-btn'))",
-                            max_iter=5,
-                            raise_exception_if_failed=False
-                        )
-                        if skip_clicked:
-                            logging.info('Clicked skip button as fallback')
-                            time.sleep(2)
-                        break
-            except Exception as e:
-                logging.warning(f'Error during onboarding navigation: {e}')
+            logging.info('Detected onboarding page, attempting bypass...')
+            console_log('\nDetected onboarding page, attempting bypass...', INFO, silent_mode=SILENT_MODE)
             
-            # Check if still on onboarding page after all attempts
+            # Strategy: Instead of trying to interact with onboarding, immediately navigate to trial page
+            # ESET may redirect us back, but let's try
+            logging.info('Attempting direct navigation to trial page...')
+            self.driver.get('https://home.eset.com/subscriptions/choose-trial')
+            time.sleep(3)
+            
+            # Check if we were redirected back to onboarding
             if 'onboarding' in self.driver.current_url.lower():
-                logging.warning('Still on onboarding page, trying direct navigation to home...')
-                console_log('Trying alternative navigation method...', INFO, silent_mode=SILENT_MODE)
-                self.driver.get('https://home.eset.com/')
+                logging.warning('Redirected back to onboarding, trying to complete flow...')
+                console_log('Onboarding is mandatory, completing flow...', INFO, silent_mode=SILENT_MODE)
                 
-                # Wait and check if navigation completed
-                for i in range(5):
-                    time.sleep(1)
-                    current_url = self.driver.current_url.lower()
-                    logging.info(f'Navigation check {i+1}/5: URL = {current_url}')
-                    if 'onboarding' not in current_url:
-                        logging.info('Successfully navigated to home!')
-                        break
+                # Go back to onboarding and try to complete it
+                self.driver.get('https://home.eset.com/onboarding/welcome')
+                time.sleep(2)
                 
-                # Final verification
+                # Try using JavaScript to complete the onboarding by simulating completion
+                try:
+                    # Try to find and click Continue button multiple times
+                    for step in range(4):  # 3 slides max
+                        logging.info(f'Onboarding step {step+1}/4...')
+                        
+                        # Use explicit WebDriver wait with EC for button to be clickable
+                        try:
+                            # Try JavaScript click instead of Selenium click
+                            js_click_result = self.driver.execute_script("""
+                                var btn = document.querySelector('[data-label="onboarding-welcome-continue-btn"]');
+                                if (btn) {
+                                    btn.click();
+                                    return true;
+                                }
+                                return false;
+                            """)
+                            
+                            if js_click_result:
+                                logging.info(f'JS click succeeded at step {step+1}')
+                                time.sleep(3)  # Wait for animation/navigation
+                                
+                                # Check if we left onboarding
+                                if 'onboarding' not in self.driver.current_url.lower():
+                                    logging.info('Left onboarding after JS click!')
+                                    console_log('Onboarding completed!', OK, silent_mode=SILENT_MODE)
+                                    break
+                            else:
+                                logging.warning(f'JS click failed at step {step+1}')
+                                break
+                        except Exception as e:
+                            logging.error(f'Error clicking at step {step+1}: {e}')
+                            break
+                except Exception as e:
+                    logging.warning(f'Error during onboarding: {e}')
+                
+                # Final check - if still on onboarding, raise error
                 if 'onboarding' in self.driver.current_url.lower():
-                    logging.error(f'Failed to leave onboarding. Final URL: {self.driver.current_url}')
+                    logging.error(f'Still on onboarding after all attempts. URL: {self.driver.current_url}')
                     # Save debug info
                     try:
                         with open('debug_onboarding_stuck.html', 'w', encoding='utf-8') as f:
@@ -212,12 +201,15 @@ class EsetKeygen(object):
                         self.driver.save_screenshot('debug_onboarding_stuck.png')
                     except:
                         pass
-                    raise RuntimeError('Cannot bypass onboarding page - navigation is blocked or ESET changed their flow')
-        
-        # Now navigate to trial page
-        logging.info('Navigating to trial subscription page...')
-        self.driver.get('https://home.eset.com/subscriptions/choose-trial')
-        time.sleep(5)  # Increased wait for page load
+                    raise RuntimeError('Cannot bypass onboarding - ESET enforces mandatory onboarding flow')
+            else:
+                logging.info('Successfully bypassed onboarding with direct navigation!')
+                console_log('Onboarding bypassed!', OK, silent_mode=SILENT_MODE)
+        else:
+            # Not on onboarding page, navigate to trial page
+            logging.info('Navigating to trial subscription page...')
+            self.driver.get('https://home.eset.com/subscriptions/choose-trial')
+            time.sleep(5)  # Wait for page load
         
         # Check again if redirected to login
         if 'login' in self.driver.current_url.lower():
