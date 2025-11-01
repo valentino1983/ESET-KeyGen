@@ -148,14 +148,23 @@ class EsetKeygen(object):
                     raise_exception_if_failed=False
                 )
                 if skip_clicked:
-                    logging.info('Onboarding skipped successfully!')
-                    console_log('Onboarding skipped successfully!', OK, silent_mode=SILENT_MODE)
-                    time.sleep(3)
-                    # Wait for navigation away from onboarding page
-                    for _ in range(10):
-                        if 'onboarding' not in self.driver.current_url.lower():
-                            break
+                    logging.info('Skip button clicked, waiting for navigation...')
+                    console_log('Skip button clicked, waiting for navigation...', INFO, silent_mode=SILENT_MODE)
+                    
+                    # Wait up to 15 seconds for the page to navigate away from onboarding
+                    navigation_success = False
+                    for i in range(15):
                         time.sleep(1)
+                        current_url = self.driver.current_url.lower()
+                        logging.info(f'Wait {i+1}/15: Current URL = {current_url}')
+                        if 'onboarding' not in current_url:
+                            navigation_success = True
+                            logging.info('Successfully navigated away from onboarding page!')
+                            console_log('Onboarding skipped successfully!', OK, silent_mode=SILENT_MODE)
+                            break
+                    
+                    if not navigation_success:
+                        logging.warning('Navigation did not complete after skip button click')
                 else:
                     # If skip button not found, try clicking "Continue" through all onboarding steps
                     logging.info('Skip button not found, will navigate through onboarding...')
@@ -179,16 +188,30 @@ class EsetKeygen(object):
             # Force check if still on onboarding page after attempts
             if 'onboarding' in self.driver.current_url.lower():
                 logging.warning('Still on onboarding page, forcing navigation to home...')
+                console_log('Forcing navigation to bypass onboarding...', INFO, silent_mode=SILENT_MODE)
                 self.driver.get('https://home.eset.com/')
-                time.sleep(2)
+                time.sleep(3)
+                
+                # Verify we successfully left onboarding
+                if 'onboarding' in self.driver.current_url.lower():
+                    logging.error('Failed to navigate away from onboarding page!')
+                    raise RuntimeError('Cannot bypass onboarding page - ESET may have changed their flow')
         
         # Now navigate to trial page
+        logging.info('Navigating to trial subscription page...')
         self.driver.get('https://home.eset.com/subscriptions/choose-trial')
-        time.sleep(3)
+        time.sleep(5)  # Increased wait for page load
         
         # Check again if redirected to login
         if 'login' in self.driver.current_url.lower():
             raise RuntimeError('Cannot access trial page - authentication required!')
+        
+        # Check if we got redirected back to onboarding
+        if 'onboarding' in self.driver.current_url.lower():
+            logging.error(f'Redirected back to onboarding! Current URL: {self.driver.current_url}')
+            raise RuntimeError('Cannot bypass onboarding - keeps redirecting back')
+        
+        logging.info(f'On trial page: {self.driver.current_url}')
         
         # Try to find the button with increased timeout and better error message
         try:
