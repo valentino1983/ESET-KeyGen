@@ -20,6 +20,7 @@ on:
         required: true
         type: choice
         options:
+          - emailfake
           - 1secmail
           - guerrillamail
           - developermail
@@ -27,8 +28,7 @@ on:
           - fakemail
           - inboxes
           - incognitomail
-          - emailfake
-        default: 1secmail
+        default: emailfake
       key_type:
         description: 'Modes of operation'
         required: true
@@ -78,7 +78,7 @@ jobs:
           else #if fallback then
             echo "account=0" >> $GITHUB_OUTPUT
             echo "key=1" >> $GITHUB_OUTPUT
-            echo "mail=1secmail" >> $GITHUB_OUTPUT
+            echo "mail=emailfake" >> $GITHUB_OUTPUT
             echo "key_type=--key" >> $GITHUB_OUTPUT
             echo "branch=main" >> $GITHUB_OUTPUT
             echo "use_vpn=false" >> $GITHUB_OUTPUT
@@ -293,4 +293,6 @@ jobs:
           path: |
             *ACCOUNTS.txt
             *KEYS.txt
+            debug_trial_page.html
+            debug_trial_page.png
           if-no-files-found: ignore
