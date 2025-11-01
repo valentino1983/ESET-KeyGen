@@ -135,6 +135,39 @@ class EsetKeygen(object):
         if 'login' in self.driver.current_url.lower():
             raise RuntimeError('Session expired or not logged in! Please ensure account is confirmed.')
         
+        # Check if we're on the onboarding page and skip it
+        if 'onboarding' in self.driver.current_url.lower():
+            logging.info('Detected onboarding page, attempting to skip...')
+            console_log('\nDetected onboarding page, attempting to skip...', INFO, silent_mode=SILENT_MODE)
+            try:
+                # Try to click "Skip introduction" button
+                skip_clicked = uCE(
+                    self.driver, 
+                    f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'onboarding-welcome-skip-introduction-btn'))",
+                    max_iter=10,
+                    raise_exception_if_failed=False
+                )
+                if skip_clicked:
+                    logging.info('Onboarding skipped successfully!')
+                    console_log('Onboarding skipped successfully!', OK, silent_mode=SILENT_MODE)
+                    time.sleep(2)
+                else:
+                    # If skip button not found, try clicking "Continue" through all onboarding steps
+                    logging.info('Skip button not found, will navigate through onboarding...')
+                    for step in range(4):  # Max 4 onboarding steps
+                        continue_clicked = uCE(
+                            self.driver,
+                            f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'onboarding-welcome-continue-btn'))",
+                            max_iter=5,
+                            raise_exception_if_failed=False
+                        )
+                        if continue_clicked:
+                            time.sleep(1)
+                        else:
+                            break
+            except Exception as e:
+                logging.warning(f'Error during onboarding skip: {e}')
+        
         # Now navigate to trial page
         self.driver.get('https://home.eset.com/subscriptions/choose-trial')
         time.sleep(3)
