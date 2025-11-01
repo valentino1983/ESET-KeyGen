@@ -126,8 +126,39 @@ class EsetKeygen(object):
 
         logging.info(f'[{self.mode}] Request sending...')
         console_log(f'\n[{self.mode}] Request sending...', INFO, silent_mode=SILENT_MODE)
+        
+        # First, ensure we're logged in by visiting home page
+        self.driver.get('https://home.eset.com/')
+        time.sleep(2)
+        
+        # Check if redirected to login (session expired)
+        if 'login' in self.driver.current_url.lower():
+            raise RuntimeError('Session expired or not logged in! Please ensure account is confirmed.')
+        
+        # Now navigate to trial page
         self.driver.get('https://home.eset.com/subscriptions/choose-trial')
-        uCE(self.driver, f"return {GET_EBAV}('button', 'data-label', 'subscription-choose-trial-ehsp-card-button') != null")
+        time.sleep(3)
+        
+        # Check again if redirected to login
+        if 'login' in self.driver.current_url.lower():
+            raise RuntimeError('Cannot access trial page - authentication required!')
+        
+        # Try to find the button with increased timeout and better error message
+        try:
+            uCE(self.driver, f"return {GET_EBAV}('button', 'data-label', 'subscription-choose-trial-ehsp-card-button') != null", max_iter=50, delay=1)
+        except RuntimeError as e:
+            # Debug: save page source and screenshot for troubleshooting
+            logging.error(f'Button not found! Current URL: {self.driver.current_url}')
+            logging.error(f'Page title: {self.driver.title}')
+            try:
+                with open('debug_trial_page.html', 'w', encoding='utf-8') as f:
+                    f.write(self.driver.page_source)
+                self.driver.save_screenshot('debug_trial_page.png')
+                logging.error('Debug files saved: debug_trial_page.html and debug_trial_page.png')
+            except:
+                pass
+            raise RuntimeError(f'Trial button not found! Page may have changed structure. {str(e)}')
+        
         if self.mode == 'ESET HOME':
             uCE(self.driver, f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'subscription-choose-trial-ehsp-card-button'))")
         elif self.mode == 'SMALL BUSINESS':
