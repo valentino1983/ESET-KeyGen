@@ -1,4 +1,4 @@
-name: Account and Key Generator
+name: ProtectHub - Account and Key Generator
 
 on:
  # schedule: #if need schedule 
@@ -34,9 +34,8 @@ on:
         required: true
         type: choice
         options:
-          - --key
-          - --small-business-key
-        default: --key
+          - --advanced-key
+        default: --advanced-key
       os:
         description: 'Operating System of runner (Linux, macOS, Windows)'
         required: true
