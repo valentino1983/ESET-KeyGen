@@ -20,7 +20,6 @@ on:
         required: true
         type: choice
         options:
-          - hi2.in
           - 1secmail
           - guerrillamail
           - developermail
@@ -29,7 +28,7 @@ on:
           - inboxes
           - incognitomail
           - emailfake
-        default: hi2.in
+        default: 1secmail
       key_type:
         description: 'Modes of operation'
         required: true
@@ -73,7 +72,7 @@ jobs:
           else #if fallback then
             echo "account=0" >> $GITHUB_OUTPUT
             echo "key=1" >> $GITHUB_OUTPUT
-            echo "mail=hi2.in" >> $GITHUB_OUTPUT
+            echo "mail=1secmail" >> $GITHUB_OUTPUT
             echo "key_type=--key" >> $GITHUB_OUTPUT
             echo "branch=main" >> $GITHUB_OUTPUT
           fi
