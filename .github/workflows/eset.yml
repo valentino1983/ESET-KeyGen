@@ -82,6 +82,21 @@ jobs:
         with:
           ref: ${{ steps.vars.outputs.branch }}
 
+      - name: Setup Cloudflare WARP VPN
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "Installing Cloudflare WARP..."
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          sudo apt-get update
+          sudo apt-get install -y cloudflare-warp
+          warp-cli register
+          warp-cli connect
+          sleep 5
+          echo "WARP connected, checking IP..."
+          curl -s https://www.cloudflare.com/cdn-cgi/trace/ | grep warp
+
       - name: Setup & Run Script (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
@@ -114,6 +129,27 @@ jobs:
             cat ./*KEYS.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "None" >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Cleanup WARP VPN
+        if: runner.os == 'Linux' && always()
+        shell: bash
+        run: |
+          warp-cli disconnect || true
+          warp-cli delete || true
+
+      - name: Setup Cloudflare WARP VPN (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "Installing Cloudflare WARP for Windows..."
+          Invoke-WebRequest -Uri "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi" -OutFile "$env:TEMP\Cloudflare_WARP.msi"
+          Start-Process msiexec.exe -Wait -ArgumentList "/i $env:TEMP\Cloudflare_WARP.msi /qn"
+          Start-Sleep -Seconds 10
+          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" register
+          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" connect
+          Start-Sleep -Seconds 10
+          Write-Host "WARP connected, checking IP..."
+          Invoke-RestMethod -Uri "https://www.cloudflare.com/cdn-cgi/trace/"
+
       - name: Setup & Run Script (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -138,3 +174,10 @@ jobs:
             echo "`nKey:" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
             Get-Content -Path ./*KEYS.txt -ErrorAction SilentlyContinue | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
+
+      - name: Cleanup WARP VPN (Windows)
+        if: runner.os == 'Windows' && always()
+        shell: pwsh
+        run: |
+          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" disconnect
+          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" delete
