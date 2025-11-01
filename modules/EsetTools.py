@@ -135,67 +135,84 @@ class EsetKeygen(object):
         if 'login' in self.driver.current_url.lower():
             raise RuntimeError('Session expired or not logged in! Please ensure account is confirmed.')
         
-        # Check if we're on the onboarding page and skip it
+        # Check if we're on the onboarding page and navigate through it
         if 'onboarding' in self.driver.current_url.lower():
-            logging.info('Detected onboarding page, attempting to skip...')
-            console_log('\nDetected onboarding page, attempting to skip...', INFO, silent_mode=SILENT_MODE)
+            logging.info('Detected onboarding page, navigating through carousel...')
+            console_log('\nDetected onboarding page, navigating through carousel...', INFO, silent_mode=SILENT_MODE)
             try:
-                # Try to click "Skip introduction" button
-                skip_clicked = uCE(
-                    self.driver, 
-                    f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'onboarding-welcome-skip-introduction-btn'))",
-                    max_iter=10,
-                    raise_exception_if_failed=False
-                )
-                if skip_clicked:
-                    logging.info('Skip button clicked, waiting for navigation...')
-                    console_log('Skip button clicked, waiting for navigation...', INFO, silent_mode=SILENT_MODE)
+                # Click "Continue" button through all carousel slides (typically 3-4 slides)
+                # The last click should navigate away from onboarding
+                for step in range(5):  # Max 5 clicks to be safe
+                    logging.info(f'Onboarding step {step+1}/5...')
                     
-                    # Wait up to 15 seconds for the page to navigate away from onboarding
-                    navigation_success = False
-                    for i in range(15):
-                        time.sleep(1)
+                    # Check if we've already left onboarding
+                    if 'onboarding' not in self.driver.current_url.lower():
+                        logging.info('Left onboarding page successfully!')
+                        console_log('Onboarding completed successfully!', OK, silent_mode=SILENT_MODE)
+                        break
+                    
+                    # Try to click Continue button
+                    continue_clicked = uCE(
+                        self.driver,
+                        f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'onboarding-welcome-continue-btn'))",
+                        max_iter=10,
+                        raise_exception_if_failed=False
+                    )
+                    
+                    if continue_clicked:
+                        logging.info(f'Continue button clicked at step {step+1}')
+                        time.sleep(2)
+                        
+                        # After clicking, check URL
                         current_url = self.driver.current_url.lower()
-                        logging.info(f'Wait {i+1}/15: Current URL = {current_url}')
+                        logging.info(f'After click: URL = {current_url}')
+                        
                         if 'onboarding' not in current_url:
-                            navigation_success = True
-                            logging.info('Successfully navigated away from onboarding page!')
-                            console_log('Onboarding skipped successfully!', OK, silent_mode=SILENT_MODE)
+                            logging.info('Successfully navigated away from onboarding!')
+                            console_log('Onboarding completed successfully!', OK, silent_mode=SILENT_MODE)
                             break
-                    
-                    if not navigation_success:
-                        logging.warning('Navigation did not complete after skip button click')
-                else:
-                    # If skip button not found, try clicking "Continue" through all onboarding steps
-                    logging.info('Skip button not found, will navigate through onboarding...')
-                    for step in range(4):  # Max 4 onboarding steps
-                        continue_clicked = uCE(
+                    else:
+                        logging.warning(f'Continue button not found at step {step+1}')
+                        # Try skip button as fallback
+                        skip_clicked = uCE(
                             self.driver,
-                            f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'onboarding-welcome-continue-btn'))",
+                            f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'onboarding-welcome-skip-introduction-btn'))",
                             max_iter=5,
                             raise_exception_if_failed=False
                         )
-                        if continue_clicked:
+                        if skip_clicked:
+                            logging.info('Clicked skip button as fallback')
                             time.sleep(2)
-                            # Check if we've left onboarding
-                            if 'onboarding' not in self.driver.current_url.lower():
-                                break
-                        else:
-                            break
+                        break
             except Exception as e:
-                logging.warning(f'Error during onboarding skip: {e}')
+                logging.warning(f'Error during onboarding navigation: {e}')
             
-            # Force check if still on onboarding page after attempts
+            # Check if still on onboarding page after all attempts
             if 'onboarding' in self.driver.current_url.lower():
-                logging.warning('Still on onboarding page, forcing navigation to home...')
-                console_log('Forcing navigation to bypass onboarding...', INFO, silent_mode=SILENT_MODE)
+                logging.warning('Still on onboarding page, trying direct navigation to home...')
+                console_log('Trying alternative navigation method...', INFO, silent_mode=SILENT_MODE)
                 self.driver.get('https://home.eset.com/')
-                time.sleep(3)
                 
-                # Verify we successfully left onboarding
+                # Wait and check if navigation completed
+                for i in range(5):
+                    time.sleep(1)
+                    current_url = self.driver.current_url.lower()
+                    logging.info(f'Navigation check {i+1}/5: URL = {current_url}')
+                    if 'onboarding' not in current_url:
+                        logging.info('Successfully navigated to home!')
+                        break
+                
+                # Final verification
                 if 'onboarding' in self.driver.current_url.lower():
-                    logging.error('Failed to navigate away from onboarding page!')
-                    raise RuntimeError('Cannot bypass onboarding page - ESET may have changed their flow')
+                    logging.error(f'Failed to leave onboarding. Final URL: {self.driver.current_url}')
+                    # Save debug info
+                    try:
+                        with open('debug_onboarding_stuck.html', 'w', encoding='utf-8') as f:
+                            f.write(self.driver.page_source)
+                        self.driver.save_screenshot('debug_onboarding_stuck.png')
+                    except:
+                        pass
+                    raise RuntimeError('Cannot bypass onboarding page - navigation is blocked or ESET changed their flow')
         
         # Now navigate to trial page
         logging.info('Navigating to trial subscription page...')

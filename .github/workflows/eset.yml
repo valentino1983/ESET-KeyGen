@@ -295,4 +295,6 @@ jobs:
             *KEYS.txt
             debug_trial_page.html
             debug_trial_page.png
+            debug_onboarding_stuck.html
+            debug_onboarding_stuck.png
           if-no-files-found: ignore
