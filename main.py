@@ -4,6 +4,8 @@ import pathlib
 import json
 import sys
 import io
+import random
+import requests
 
 I_AM_EXECUTABLE = (True if (getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')) else False)
 PATH_TO_SELF = sys.executable if I_AM_EXECUTABLE else __file__
@@ -46,7 +48,7 @@ if '--no-logo' in sys.argv:
 
 DEFAULT_PATH_TO_PROXY_FILE = 'proxies.txt'
 DEFAULT_EMAIL_API = 'emailfake'
-AVAILABLE_EMAIL_APIS = ('1secmail', 'guerrillamail', 'developermail', 'mailticking', 'fakemail', 'inboxes', 'incognitomail', 'emailfake')
+AVAILABLE_EMAIL_APIS = ('1secmail', 'guerrillamail', 'developermail', 'mailticking', 'fakemail', 'inboxes', 'incognitomail', 'emailfake', 'mailslurp', 'mailsac')
 WEB_WRAPPER_EMAIL_APIS = ('guerrillamail', 'mailticking', 'fakemail', 'inboxes', 'incognitomail', 'emailfake')
 EMAIL_API_CLASSES = {
     'guerrillamail': GuerRillaMailAPI,    
@@ -57,6 +59,8 @@ EMAIL_API_CLASSES = {
     'inboxes': InboxesAPI,
     'incognitomail': IncognitoMailAPI,
     'emailfake': EmailFakeAPI,
+    'mailslurp': MailSlurpAPI,
+    'mailsac': MailsacAPI,
 }
 
 args = {
@@ -520,6 +524,27 @@ def main(disable_exit=False):
                 email_obj = EMAIL_API_CLASSES[args['email_api']](DRIVER)
             else: # real APIs without the need for a browser
                 email_obj = EMAIL_API_CLASSES[args['email_api']]()
+            
+            # Set API keys for services that require them
+            if args['email_api'] == 'mailslurp':
+                import os
+                api_key = os.environ.get('MAILSLURP_API_KEY')
+                if not api_key:
+                    logging.critical('MailSlurp API key not found! Set MAILSLURP_API_KEY environment variable.')
+                    console_log('MailSlurp API key not found! Set MAILSLURP_API_KEY environment variable.\n', ERROR, silent_mode=SILENT_MODE)
+                    PROXY_ERROR_COUNTER += 1
+                else:
+                    email_obj.set_api_key(api_key)
+            elif args['email_api'] == 'mailsac':
+                import os
+                api_key = os.environ.get('MAILSAC_API_KEY')
+                if not api_key:
+                    logging.critical('Mailsac API key not found! Set MAILSAC_API_KEY environment variable.')
+                    console_log('Mailsac API key not found! Set MAILSAC_API_KEY environment variable.\n', ERROR, silent_mode=SILENT_MODE)
+                    PROXY_ERROR_COUNTER += 1
+                else:
+                    email_obj.set_api_key(api_key)
+            
             try:
                 email_obj.init()
                 if email_obj.email is not None:

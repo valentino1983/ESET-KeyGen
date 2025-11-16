@@ -4,6 +4,8 @@ from email import policy, parser
 
 import requests
 import time
+import uuid
+import os
 
 DEFINE_PARSE_10MINUTEMAIL_INBOX_FUNCTION = """function parse_10minutemail_inbox() {
     updatemailbox()
@@ -49,15 +51,20 @@ PARSE_MAILTICKING_INBOX = """function MailTickingParse() {
 }
 return MailTickingParse()"""
 PARSE_FAKEMAIL_INBOX = """
-let raw_inbox = Array.from(document.getElementById('schranka').children).slice(0, -3)
-let inbox = []
-for(let i=0; i < raw_inbox.length; i++) {
-    let id = raw_inbox[i].dataset.href
-    let from = raw_inbox[i].children[0].children[1].tagName.toLowerCase()
-    let subject = raw_inbox[i].children[1].innerText.trim()
-    inbox.push([id, from, subject])
+let inbox = [];
+let schranka = document.getElementById('schranka');
+if (!schranka) {
+    // Element not found, return empty inbox
+    return inbox;
 }
-return inbox
+let raw_inbox = Array.from(schranka.children).slice(0, -3);
+for (let i = 0; i < raw_inbox.length; i++) {
+    let id = raw_inbox[i].dataset.href;
+    let from = raw_inbox[i].children[0]?.children[1]?.tagName?.toLowerCase() || "";
+    let subject = raw_inbox[i].children[1]?.innerText?.trim() || "";
+    inbox.push([id, from, subject]);
+}
+return inbox;
 """
 PARSE_1SECMAILPRO_INBOX = """
 let iframes = document.getElementsByTagName('iframe')
@@ -423,6 +430,169 @@ class EmailFakeAPI:
         self.driver.switch_to.window(self.window_handle)
         self.driver.get(url)
         self.opened_mail = True
+
+class MailSlurpAPI:
+    def __init__(self):
+        self.class_name = 'mailslurp'
+        self.email = None
+        self.inbox_id = None
+        self.api_key = None
+        self.base_url = 'https://api.mailslurp.com'
+        self.headers = {}
+    
+    def set_api_key(self, api_key):
+        """Set MailSlurp API key from environment or config"""
+        self.api_key = api_key
+        self.headers = {
+            'x-api-key': self.api_key,
+            'Content-Type': 'application/json'
+        }
+    
+    def init(self):
+        """Create a new inbox in MailSlurp"""
+        if not self.api_key:
+            raise RuntimeError('MailSlurpAPI: API key not set! Set via environment variable MAILSLURP_API_KEY')
+        
+        try:
+            r = requests.post(
+                f'{self.base_url}/inboxes',
+                headers=self.headers,
+                json={}
+            )
+            if r.status_code != 201:
+                raise RuntimeError(f'MailSlurpAPI: Failed to create inbox - {r.status_code}')
+            
+            result = r.json()
+            self.inbox_id = result['id']
+            self.email = result['emailAddress']
+        except Exception as e:
+            raise RuntimeError(f'MailSlurpAPI: {str(e)}')
+    
+    def get_messages(self):
+        """Retrieve messages from MailSlurp inbox"""
+        if not self.inbox_id:
+            raise RuntimeError('MailSlurpAPI: Inbox not initialized!')
+        
+        try:
+            r = requests.get(
+                f'{self.base_url}/inboxes/{self.inbox_id}/emails',
+                headers=self.headers
+            )
+            if r.status_code != 200:
+                return []
+            
+            emails = r.json()
+            messages = []
+            for email in emails:
+                messages.append({
+                    'from': email.get('from', ''),
+                    'subject': email.get('subject', ''),
+                    'body': email.get('body', '')
+                })
+            return messages
+        except:
+            return []
+    
+    def get_message(self, email_id):
+        """Get a specific message by ID"""
+        try:
+            r = requests.get(
+                f'{self.base_url}/emails/{email_id}',
+                headers=self.headers
+            )
+            if r.status_code == 200:
+                email = r.json()
+                return {
+                    'from': email.get('from', ''),
+                    'subject': email.get('subject', ''),
+                    'body': email.get('body', '')
+                }
+        except:
+            pass
+        return None
+    
+    def cleanup(self):
+        """Delete inbox after use"""
+        if self.inbox_id:
+            try:
+                requests.delete(
+                    f'{self.base_url}/inboxes/{self.inbox_id}',
+                    headers=self.headers
+                )
+            except:
+                pass
+
+class MailsacAPI:
+    def __init__(self):
+        self.class_name = 'mailsac'
+        self.email = None
+        self.api_key = None
+        self.base_url = 'https://api.mailsac.com'
+        self.headers = {}
+    
+    def set_api_key(self, api_key):
+        """Set Mailsac API key from environment or config"""
+        self.api_key = api_key
+        self.headers = {
+            'Mailsac-Key': self.api_key,
+            'Content-Type': 'application/json'
+        }
+    
+    def init(self):
+        """Generate a random email address (Mailsac allows free public inboxes)"""
+        if not self.api_key:
+            raise RuntimeError('MailsacAPI: API key not set! Set via environment variable MAILSAC_API_KEY')
+        
+        try:
+            # Generate random email
+            random_name = str(uuid.uuid4())[:8]
+            self.email = f'{random_name}@mailsac.com'
+        except Exception as e:
+            raise RuntimeError(f'MailsacAPI: {str(e)}')
+    
+    def get_messages(self):
+        """Retrieve messages from Mailsac inbox"""
+        if not self.email:
+            raise RuntimeError('MailsacAPI: Email not initialized!')
+        
+        try:
+            r = requests.get(
+                f'{self.base_url}/messages',
+                headers=self.headers,
+                params={'to': self.email}
+            )
+            if r.status_code != 200:
+                return []
+            
+            emails = r.json()
+            messages = []
+            for email in emails:
+                messages.append({
+                    'from': email.get('from', ''),
+                    'subject': email.get('subject', ''),
+                    'body': email.get('body', '')
+                })
+            return messages
+        except:
+            return []
+    
+    def get_message(self, message_id):
+        """Get a specific message by ID"""
+        try:
+            r = requests.get(
+                f'{self.base_url}/messages/{message_id}',
+                headers=self.headers
+            )
+            if r.status_code == 200:
+                email = r.json()
+                return {
+                    'from': email.get('from', ''),
+                    'subject': email.get('subject', ''),
+                    'body': email.get('body', '')
+                }
+        except:
+            pass
+        return None
 
 class CustomEmailAPI:
     def __init__(self):

@@ -20,7 +20,6 @@ on:
         required: true
         type: choice
         options:
-          - emailfake
           - 1secmail
           - guerrillamail
           - developermail
@@ -28,6 +27,9 @@ on:
           - fakemail
           - inboxes
           - incognitomail
+          - emailfake
+          - mailslurp
+          - mailsac
         default: emailfake
       key_type:
         description: 'Modes of operation'
@@ -83,6 +85,13 @@ jobs:
             echo "branch=main" >> $GITHUB_OUTPUT
             echo "use_vpn=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Set Email API Keys
+        shell: bash
+        run: |
+          # Set API keys from GitHub Secrets if using MailSlurp or Mailsac
+          [[ -n "${{ secrets.MAILSLURP_API_KEY }}" ]] && echo "MAILSLURP_API_KEY=${{ secrets.MAILSLURP_API_KEY }}" >> $GITHUB_ENV
+          [[ -n "${{ secrets.MAILSAC_API_KEY }}" ]] && echo "MAILSAC_API_KEY=${{ secrets.MAILSAC_API_KEY }}" >> $GITHUB_ENV
 
       - name: Checkout Repository
         uses: actions/checkout@v4

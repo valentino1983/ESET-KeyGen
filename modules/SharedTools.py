@@ -413,7 +413,7 @@ def parseToken(email_obj, driver=None, eset_business=False, delay=DEFAULT_DELAY,
                         activated_href = email_obj.get_message(message['id'])['body']
                     elif message['from'].find('product.eset.com') != -1:
                         activated_href = email_obj.get_message(message['id'])['body']
-        elif email_obj.class_name in ['developermail', 'inboxes']:
+        elif email_obj.class_name in ['developermail', 'inboxes', 'mailslurp', 'mailsac']:
             messages = email_obj.get_messages()
             if messages is not None:
                 for message in messages:
