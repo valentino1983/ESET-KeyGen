@@ -30,6 +30,7 @@ on:
           - emailfake
           - mailslurp
           - mailsac
+          - tempmail
         default: emailfake
       key_type:
         description: 'Modes of operation'

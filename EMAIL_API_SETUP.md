@@ -41,6 +41,11 @@ This document explains how to set up and use the different email providers with 
    - Browser-based
    - Usage: `python main.py --auto-detect-browser --key --email-api emailfake`
 
+8. **TempMail.org** - https://temp-mail.org
+   - Free temporary email service
+   - Browser-based
+   - Usage: `python main.py --auto-detect-browser --key --email-api tempmail`
+
 ### Professional Email Testing Services (API Key Required)
 
 These are designed for automated testing and CI/CD pipelines, offering more reliability and custom domain support.

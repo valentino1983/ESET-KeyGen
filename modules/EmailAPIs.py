@@ -5,7 +5,7 @@ from email import policy, parser
 import requests
 import time
 import uuid
-import os
+import random
 
 DEFINE_PARSE_10MINUTEMAIL_INBOX_FUNCTION = """function parse_10minutemail_inbox() {
     updatemailbox()
@@ -594,9 +594,61 @@ class MailsacAPI:
             pass
         return None
 
+class TempMailOrgAPI:
+    def __init__(self, driver: Chrome):
+        self.class_name = 'tempmail'
+        self.driver = driver
+        self.email = None
+        self.window_handle = None
+    
+    def init(self):
+        """Initialize temp-mail.org inbox"""
+        self.driver.get('https://temp-mail.org/en/')
+        self.window_handle = self.driver.current_window_handle
+        untilConditionExecute(self.driver, "return document.getElementById('mail') != null && document.getElementById('mail').value.trim() !== ''", max_iter=20)
+        self.email = self.driver.execute_script("return document.getElementById('mail').value.trim()")
+    
+    def parse_inbox(self):
+        """Parse inbox for messages"""
+        self.driver.switch_to.window(self.window_handle)
+        self.driver.get('https://temp-mail.org/en/')
+        try:
+            # Wait for inbox to load
+            time.sleep(2)
+            # Check if there are any messages
+            inbox = self.driver.execute_script("""
+                let inbox = [];
+                let messageRows = document.querySelectorAll('table tbody tr');
+                for (let i = 0; i < messageRows.length; i++) {
+                    let row = messageRows[i];
+                    if (row.querySelector('td')) {
+                        let from = row.querySelector('td:nth-child(1)') ? row.querySelector('td:nth-child(1)').innerText.trim() : '';
+                        let subject = row.querySelector('td:nth-child(2)') ? row.querySelector('td:nth-child(2)').innerText.trim() : '';
+                        let id = row.id || i;
+                        if (from && subject) {
+                            inbox.push([id, from, subject]);
+                        }
+                    }
+                }
+                return inbox;
+            """)
+            return inbox if inbox else []
+        except:
+            return []
+    
+    def open_mail(self, mail_id):
+        """Open a specific email"""
+        self.driver.switch_to.window(self.window_handle)
+        try:
+            # Click on the message row
+            self.driver.execute_script(f"document.getElementById('{mail_id}').click()")
+            time.sleep(1)
+        except:
+            pass
+
 class CustomEmailAPI:
     def __init__(self):
         self.class_name = 'custom'
         self.email = None
 
-WEB_WRAPPER_EMAIL_APIS_CLASSES = (GuerRillaMailAPI, MailTickingAPI, FakeMailAPI, InboxesAPI, IncognitoMailAPI, EmailFakeAPI)
+WEB_WRAPPER_EMAIL_APIS_CLASSES = (GuerRillaMailAPI, MailTickingAPI, FakeMailAPI, InboxesAPI, IncognitoMailAPI, EmailFakeAPI, TempMailOrgAPI)

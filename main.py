@@ -48,8 +48,8 @@ if '--no-logo' in sys.argv:
 
 DEFAULT_PATH_TO_PROXY_FILE = 'proxies.txt'
 DEFAULT_EMAIL_API = 'emailfake'
-AVAILABLE_EMAIL_APIS = ('1secmail', 'guerrillamail', 'developermail', 'mailticking', 'fakemail', 'inboxes', 'incognitomail', 'emailfake', 'mailslurp', 'mailsac')
-WEB_WRAPPER_EMAIL_APIS = ('guerrillamail', 'mailticking', 'fakemail', 'inboxes', 'incognitomail', 'emailfake')
+AVAILABLE_EMAIL_APIS = ('1secmail', 'guerrillamail', 'developermail', 'mailticking', 'fakemail', 'inboxes', 'incognitomail', 'emailfake', 'mailslurp', 'mailsac', 'tempmail')
+WEB_WRAPPER_EMAIL_APIS = ('guerrillamail', 'mailticking', 'fakemail', 'inboxes', 'incognitomail', 'emailfake', 'tempmail')
 EMAIL_API_CLASSES = {
     'guerrillamail': GuerRillaMailAPI,    
     '1secmail': OneSecEmailAPI,
@@ -61,6 +61,7 @@ EMAIL_API_CLASSES = {
     'emailfake': EmailFakeAPI,
     'mailslurp': MailSlurpAPI,
     'mailsac': MailsacAPI,
+    'tempmail': TempMailOrgAPI,
 }
 
 args = {
