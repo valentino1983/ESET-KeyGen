@@ -319,39 +319,3 @@ jobs:
             debug_subscriptions_page.html
             debug_subscriptions_page.png
           if-no-files-found: ignore
-
-  reproduce-local-cli:
-    name: Reproduce Local CLI (Windows)
-    runs-on: windows-latest
-    timeout-minutes: 60
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.vars.outputs.branch }}
-
-      - name: Setup Python & Dependencies
-        shell: pwsh
-        run: |
-          python -m venv venv
-          .\venv\Scripts\pip install -r requirements.txt
-          .\venv\Scripts\Activate.ps1
-
-      - name: Run same CLI as local (reproduce)
-        shell: pwsh
-        run: |
-          echo "Running reproduce command"
-          python main.py --auto-detect-browser --key --email-api emailfake --skip-update-check --no-logo --disable-logging
-
-      - name: Collect reproduce artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: reproduce-${{ github.run_number }}
-          path: |
-            debug_onboarding_stuck.html
-            debug_onboarding_stuck.png
-            debug_onboarding_state.json
-            debug_subscription_detail.html
-            debug_subscription_full_text.txt
-          if-no-files-found: ignore
