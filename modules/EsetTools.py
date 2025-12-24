@@ -242,22 +242,51 @@ class EsetKeygen(object):
                         time.sleep(2)
                         continue
                     
-                    # Step 2a: Select "Start a 30-day trial" option
-                    trial_selected = self.driver.execute_script("""
-                        var trialLabel = document.querySelector('label[data-label="onboarding-add-subscription-protect-card-trial"]');
-                        if (trialLabel) {
+                    # Step 2a: Select "Start a 30-day trial" option (more robust)
+                    trial_selected = False
+                    try:
+                        trial_selected = self.driver.execute_script("""
+                            var trialLabel = document.querySelector('label[data-label="onboarding-add-subscription-protect-card-trial"]');
+                            if (!trialLabel) return false;
                             var input = trialLabel.querySelector('input');
-                            if (input && !input.checked) {
-                                trialLabel.click();
-                                return true;
+                            // Try regular click first
+                            try { trialLabel.click(); } catch(e) {}
+                            // Force check & dispatch events to ensure React notices change
+                            if (input) {
+                                try {
+                                    input.checked = true;
+                                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                                } catch(e) {}
                             }
-                        }
-                        return false;
-                    """)
+
+                            // Try clicking any enabled Continue button
+                            var buttons = Array.from(document.querySelectorAll('button'));
+                            for (var i=0;i<buttons.length;i++){
+                                var btn = buttons[i];
+                                var txt = (btn.innerText||'').toLowerCase().trim();
+                                if (txt === 'continue' && !btn.disabled) { btn.click(); return true; }
+                            }
+
+                            // If Continue is disabled, attempt to enable and click it
+                            for (var i=0;i<buttons.length;i++){
+                                var btn = buttons[i];
+                                var txt = (btn.innerText||'').toLowerCase().trim();
+                                if (txt === 'continue') {
+                                    try { btn.removeAttribute('disabled'); btn.disabled = false; btn.click(); return true; } catch(e) {}
+                                }
+                            }
+                            return true;
+                        """)
+                    except Exception as E:
+                        logging.debug(f'Trial selection JS error: {E}')
+                        trial_selected = False
+
                     if trial_selected:
-                        logging.info('Selected trial option')
+                        logging.info('Selected trial option (robust)')
                         action_taken = True
                         time.sleep(1)
+
                     
                     # Step 2b: Select "Protect your home" option (if present)
                     home_selected = self.driver.execute_script("""
