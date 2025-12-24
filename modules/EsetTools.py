@@ -242,50 +242,99 @@ class EsetKeygen(object):
                         time.sleep(2)
                         continue
                     
-                    # Step 2a: Select "Start a 30-day trial" option (more robust)
+                    # Step 2a: Select "Start a 30-day trial" option (more aggressive)
                     trial_selected = False
                     try:
                         trial_selected = self.driver.execute_script("""
-                            var trialLabel = document.querySelector('label[data-label="onboarding-add-subscription-protect-card-trial"]');
-                            if (!trialLabel) return false;
-                            var input = trialLabel.querySelector('input');
-                            // Try regular click first
-                            try { trialLabel.click(); } catch(e) {}
-                            // Force check & dispatch events to ensure React notices change
-                            if (input) {
+                            (function(){
+                                var debug = { success: false, inputChecked: false, buttons: [] };
+                                var trialLabel = document.querySelector('label[data-label="onboarding-add-subscription-protect-card-trial"]');
+                                var input = document.getElementById('trial') || (trialLabel && trialLabel.querySelector('input')) || null;
+                                // Try clicking label and input with mouse events
                                 try {
-                                    input.checked = true;
-                                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                                    if (trialLabel) {
+                                        trialLabel.scrollIntoView({block: 'center'});
+                                        trialLabel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                                        trialLabel.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                                        trialLabel.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                                    }
                                 } catch(e) {}
-                            }
+                                try {
+                                    if (input) {
+                                        input.click();
+                                        input.checked = true;
+                                        input.setAttribute('checked', '');
+                                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                                        input.dispatchEvent(new Event('blur', { bubbles: true }));
+                                        input.focus();
+                                        input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                                        debug.inputChecked = !!input.checked;
+                                    }
+                                } catch(e) { }
 
-                            // Try clicking any enabled Continue button
-                            var buttons = Array.from(document.querySelectorAll('button'));
-                            for (var i=0;i<buttons.length;i++){
-                                var btn = buttons[i];
-                                var txt = (btn.innerText||'').toLowerCase().trim();
-                                if (txt === 'continue' && !btn.disabled) { btn.click(); return true; }
-                            }
+                                // Set aria attributes on radio elements if present
+                                try {
+                                    if (trialLabel) {
+                                        trialLabel.setAttribute('aria-checked', 'true');
+                                    }
+                                } catch(e) {}
 
-                            // If Continue is disabled, attempt to enable and click it
-                            for (var i=0;i<buttons.length;i++){
-                                var btn = buttons[i];
-                                var txt = (btn.innerText||'').toLowerCase().trim();
-                                if (txt === 'continue') {
-                                    try { btn.removeAttribute('disabled'); btn.disabled = false; btn.click(); return true; } catch(e) {}
+                                var buttons = Array.from(document.querySelectorAll('button'));
+                                for (var i=0;i<buttons.length;i++){
+                                    var btn = buttons[i];
+                                    var txt = (btn.innerText||'').toLowerCase().trim();
+                                    var b = { text: txt, disabled: !!btn.disabled, ariaDisabled: btn.getAttribute('aria-disabled') };
+                                    debug.buttons.push(b);
+                                    if (txt === 'continue') {
+                                        try {
+                                            // try to enable it
+                                            btn.removeAttribute('disabled');
+                                            btn.setAttribute('aria-disabled', 'false');
+                                            btn.disabled = false;
+                                            btn.classList.remove('disabled');
+                                        } catch(e) {}
+                                        try { btn.scrollIntoView({block:'center'}); btn.click(); debug.success = true; return debug; } catch(e) { }
+                                    }
                                 }
-                            }
-                            return true;
+
+                                // Last attempt: find any element with data-label containing 'continue' and click
+                                try {
+                                    var cont = document.querySelector('[data-label*="continue"]');
+                                    if (cont) { cont.click(); debug.success = true; }
+                                } catch(e) {}
+
+                                return debug;
+                            })();
                         """)
+                        # trial_selected will be a dict-like object from JS; convert to truthy
+                        if isinstance(trial_selected, dict):
+                            logging.info(f"Trial JS result: {trial_selected}")
+                            action_taken = trial_selected.get('success', False) or trial_selected.get('inputChecked', False)
+                            if action_taken:
+                                trial_selected = True
+                            else:
+                                trial_selected = False
+                        else:
+                            trial_selected = bool(trial_selected)
                     except Exception as E:
                         logging.debug(f'Trial selection JS error: {E}')
                         trial_selected = False
 
                     if trial_selected:
-                        logging.info('Selected trial option (robust)')
+                        logging.info('Selected trial option (aggressive)')
                         action_taken = True
                         time.sleep(1)
+                    else:
+                        # Save additional state to help CI debugging
+                        try:
+                            state = self.driver.execute_script("return (function(){ var res = {}; res.bodyText = document.body.innerText.slice(0,2000); res.buttons = Array.from(document.querySelectorAll('button')).map(b=>({text:(b.innerText||'').trim(), disabled:!!b.disabled, ariaDisabled:b.getAttribute('aria-disabled')})); res.radios = Array.from(document.querySelectorAll('input[type=radio]')).map(r=>({id:r.id, name:r.name, checked:!!r.checked})); return res; })();")
+                            with open('debug_onboarding_state.json','w',encoding='utf-8') as f:
+                                import json
+                                json.dump(state, f, indent=2)
+                            logging.info('Saved debug_onboarding_state.json')
+                        except Exception:
+                            pass
 
                     
                     # Step 2b: Select "Protect your home" option (if present)
