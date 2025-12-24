@@ -88,11 +88,15 @@ jobs:
           fi
 
       - name: Set Email API Keys
+        if: ${{ steps.vars.outputs.mail == 'mailslurp' || steps.vars.outputs.mail == 'mailsac' }}
         shell: bash
         run: |
-          # Set API keys from GitHub Secrets if using MailSlurp or Mailsac
-          [[ -n "${{ secrets.MAILSLURP_API_KEY }}" ]] && echo "MAILSLURP_API_KEY=${{ secrets.MAILSLURP_API_KEY }}" >> $GITHUB_ENV
-          [[ -n "${{ secrets.MAILSAC_API_KEY }}" ]] && echo "MAILSAC_API_KEY=${{ secrets.MAILSAC_API_KEY }}" >> $GITHUB_ENV
+          # Set API keys from GitHub Secrets only when the selected mail provider requires them
+          if [[ "${{ steps.vars.outputs.mail }}" == "mailslurp" ]]; then
+            [[ -n "${{ secrets.MAILSLURP_API_KEY }}" ]] && echo "MAILSLURP_API_KEY=${{ secrets.MAILSLURP_API_KEY }}" >> $GITHUB_ENV
+          elif [[ "${{ steps.vars.outputs.mail }}" == "mailsac" ]]; then
+            [[ -n "${{ secrets.MAILSAC_API_KEY }}" ]] && echo "MAILSAC_API_KEY=${{ secrets.MAILSAC_API_KEY }}" >> $GITHUB_ENV
+          fi
 
       - name: Checkout Repository
         uses: actions/checkout@v4
