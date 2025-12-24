@@ -471,24 +471,33 @@ class EsetKeygen(object):
         license_info = self.driver.execute_script("""
             var result = {
                 activation_key: null,
-                expiration_date: null
+                expiration_date: null,
+                found_by: null
             };
-            
+
             // Get all text content
-            var all_text = document.body.innerText;
-            
-            // Look for activation key - search for "Activation key" followed by the key
-            var activation_match = all_text.match(/Activation key[\\s\\S]*?([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})/);
+            var all_text = document.body.innerText || '';
+
+            // Try to find activation key following the label "Activation key" (case-insensitive)
+            var activation_match = all_text.match(/activation key[\\s\\S]*?([A-Z0-9]{4}(?:-[A-Z0-9]{4}){4})/i);
             if (activation_match && activation_match[1]) {
-                result.activation_key = activation_match[1];
+                result.activation_key = activation_match[1].toUpperCase();
+                result.found_by = 'activation_label';
+            } else {
+                // Fallback: search for any 5-group license-like pattern anywhere on the page
+                var key_match = all_text.match(/[A-Z0-9]{4}(?:-[A-Z0-9]{4}){4}/i);
+                if (key_match && key_match[0]) {
+                    result.activation_key = key_match[0].toUpperCase();
+                    result.found_by = 'pattern_fallback';
+                }
             }
-            
-            // Look for expiration date - search for "EXPIRATION DATE" or "Expiration date" followed by date in DD.MM.YYYY format
+
+            // Look for expiration date - search for "Expiration date" followed by DD.MM.YYYY format
             var expiration_match = all_text.match(/[Ee]xpiration date[\\s\\S]*?(\\d{2}\\.\\d{2}\\.\\d{4})/);
             if (expiration_match && expiration_match[1]) {
                 result.expiration_date = expiration_match[1];
             }
-            
+
             return result;
         """)
         
@@ -498,16 +507,26 @@ class EsetKeygen(object):
             console_log(f'\n[{self.mode}] Request successfully sent!', OK, silent_mode=SILENT_MODE)
         else:
             logging.error('Could not extract license key from subscription page')
+            logging.info(f'license_info: {license_info}')
             logging.info(f'Page content preview: {self.driver.find_element("tag name", "body").text[:500]}')
             try:
                 with open('debug_subscription_detail.html', 'w', encoding='utf-8') as f:
                     f.write(self.driver.page_source)
                 self.driver.save_screenshot('debug_subscription_detail.png')
                 logging.info('Saved debug_subscription_detail.html and debug_subscription_detail.png')
-                # Also save text content
+                # Also save text content (body text)
                 with open('debug_subscription_detail.txt', 'w', encoding='utf-8') as f:
                     f.write(self.driver.find_element("tag name", "body").text)
                 logging.info('Saved debug_subscription_detail.txt with page text')
+
+                # Additionally capture the full page text via JS (document.documentElement.innerText)
+                try:
+                    full_text = self.driver.execute_script("return document.documentElement.innerText") or ''
+                    with open('debug_subscription_full_text.txt', 'w', encoding='utf-8') as f:
+                        f.write(full_text)
+                    logging.info('Saved debug_subscription_full_text.txt with full page text')
+                except Exception as e:
+                    logging.warning(f'Could not capture full page text via JS: {e}')
             except:
                 pass
             raise RuntimeError('Failed to extract license key from subscription details!')

@@ -311,4 +311,10 @@ jobs:
             debug_trial_page.png
             debug_onboarding_stuck.html
             debug_onboarding_stuck.png
+            debug_subscription_detail.html
+            debug_subscription_detail.png
+            debug_subscription_detail.txt
+            debug_subscription_full_text.txt
+            debug_subscriptions_page.html
+            debug_subscriptions_page.png
           if-no-files-found: ignore
