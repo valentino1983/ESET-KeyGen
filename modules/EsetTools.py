@@ -11,6 +11,13 @@ import random
 
 SILENT_MODE = '--silent' in sys.argv
 
+# Environment control for debug artifact generation
+import os
+
+def generate_debug_artifacts_enabled():
+    """Return True if GENERATE_DEBUG_ARTIFACTS env var is set to a truthy value."""
+    return os.getenv('GENERATE_DEBUG_ARTIFACTS', 'false').lower() in ('1', 'true', 'yes')
+
 # Random name lists for generating realistic names
 FIRST_NAMES = [
     'James', 'Mary', 'John', 'Patricia', 'Robert', 'Jennifer', 'Michael', 'Linda',
@@ -327,14 +334,17 @@ class EsetKeygen(object):
                         time.sleep(1)
                     else:
                         # Save additional state to help CI debugging
-                        try:
-                            state = self.driver.execute_script("return (function(){ var res = {}; res.bodyText = document.body.innerText.slice(0,2000); res.buttons = Array.from(document.querySelectorAll('button')).map(b=>({text:(b.innerText||'').trim(), disabled:!!b.disabled, ariaDisabled:b.getAttribute('aria-disabled')})); res.radios = Array.from(document.querySelectorAll('input[type=radio]')).map(r=>({id:r.id, name:r.name, checked:!!r.checked})); return res; })();")
-                            with open('debug_onboarding_state.json','w',encoding='utf-8') as f:
-                                import json
-                                json.dump(state, f, indent=2)
-                            logging.info('Saved debug_onboarding_state.json')
-                        except Exception:
-                            pass
+                        if generate_debug_artifacts_enabled():
+                            try:
+                                state = self.driver.execute_script("return (function(){ var res = {}; res.bodyText = document.body.innerText.slice(0,2000); res.buttons = Array.from(document.querySelectorAll('button')).map(b=>({text:(b.innerText||'').trim(), disabled:!!b.disabled, ariaDisabled:b.getAttribute('aria-disabled')})); res.radios = Array.from(document.querySelectorAll('input[type=radio]')).map(r=>({id:r.id, name:r.name, checked:!!r.checked})); return res; })();")
+                                with open('debug_onboarding_state.json','w',encoding='utf-8') as f:
+                                    import json
+                                    json.dump(state, f, indent=2)
+                                logging.info('Saved debug_onboarding_state.json')
+                            except Exception as e:
+                                logging.warning(f'Could not save debug_onboarding_state.json: {e}')
+                        else:
+                            logging.debug('Skipping debug_onboarding_state.json write (disabled by env)')
 
                     
                     # Step 2b: Select "Protect your home" option (if present)
@@ -469,22 +479,26 @@ class EsetKeygen(object):
             # Final check - if still on onboarding, raise error
             if 'onboarding' in self.driver.current_url.lower():
                 logging.error(f'Still on onboarding after all attempts. URL: {self.driver.current_url}')
-                # Save debug info
-                try:
-                    with open('debug_onboarding_stuck.html', 'w', encoding='utf-8') as f:
-                        f.write(self.driver.page_source)
-                    self.driver.save_screenshot('debug_onboarding_stuck.png')
-                except:
-                    pass
-                # Also attempt to capture the UI state (buttons, radios, small page text) for CI inspection
-                try:
-                    state = self.driver.execute_script("return (function(){ var res={}; res.bodyText = document.body.innerText.slice(0,4000); res.buttons = Array.from(document.querySelectorAll('button')).map(b=>({text:(b.innerText||'').trim(), disabled:!!b.disabled, ariaDisabled:b.getAttribute('aria-disabled')})); res.radios = Array.from(document.querySelectorAll('input[type=radio]')).map(r=>({id:r.id, name:r.name, checked:!!r.checked})); return res; })();")
-                    import json
-                    with open('debug_onboarding_state.json','w',encoding='utf-8') as f:
-                        json.dump(state, f, indent=2)
-                    logging.info('Saved debug_onboarding_state.json')
-                except Exception as E:
-                    logging.warning(f'Could not save debug_onboarding_state.json: {E}')
+                if generate_debug_artifacts_enabled():
+                    # Save debug info
+                    try:
+                        with open('debug_onboarding_stuck.html', 'w', encoding='utf-8') as f:
+                            f.write(self.driver.page_source)
+                        self.driver.save_screenshot('debug_onboarding_stuck.png')
+                        logging.info('Saved debug_onboarding_stuck.*')
+                    except Exception as e:
+                        logging.warning(f'Could not save debug_onboarding_stuck files: {e}')
+                    # Also attempt to capture the UI state (buttons, radios, small page text) for CI inspection
+                    try:
+                        state = self.driver.execute_script("return (function(){ var res={}; res.bodyText = document.body.innerText.slice(0,4000); res.buttons = Array.from(document.querySelectorAll('button')).map(b=>({text:(b.innerText||'').trim(), disabled:!!b.disabled, ariaDisabled:b.getAttribute('aria-disabled')})); res.radios = Array.from(document.querySelectorAll('input[type=radio]')).map(r=>({id:r.id, name:r.name, checked:!!r.checked})); return res; })();")
+                        import json
+                        with open('debug_onboarding_state.json','w',encoding='utf-8') as f:
+                            json.dump(state, f, indent=2)
+                        logging.info('Saved debug_onboarding_state.json')
+                    except Exception as E:
+                        logging.warning(f'Could not save debug_onboarding_state.json: {E}')
+                else:
+                    logging.debug('Skipping onboarding debug artifact writes (disabled by env)')
                 raise RuntimeError('Cannot bypass onboarding - ESET enforces mandatory onboarding flow')
         
         # After onboarding is complete, the trial subscription is already activated
@@ -544,13 +558,16 @@ class EsetKeygen(object):
         
         if not open_subscription_clicked:
             logging.error('Could not find or click "Open subscription" button')
-            try:
-                with open('debug_subscriptions_page.html', 'w', encoding='utf-8') as f:
-                    f.write(self.driver.page_source)
-                self.driver.save_screenshot('debug_subscriptions_page.png')
-                logging.info('Saved debug_subscriptions_page.html and debug_subscriptions_page.png')
-            except:
-                pass
+            if generate_debug_artifacts_enabled():
+                try:
+                    with open('debug_subscriptions_page.html', 'w', encoding='utf-8') as f:
+                        f.write(self.driver.page_source)
+                    self.driver.save_screenshot('debug_subscriptions_page.png')
+                    logging.info('Saved debug_subscriptions_page.html and debug_subscriptions_page.png')
+                except Exception as e:
+                    logging.warning(f'Could not write debug_subscriptions_page files: {e}')
+            else:
+                logging.debug('Skipping debug_subscriptions_page writes (disabled by env)')
             raise RuntimeError('Could not access subscription details!')
         
         # Extract the license key and expiration date from the subscription detail page
@@ -596,26 +613,29 @@ class EsetKeygen(object):
             logging.error('Could not extract license key from subscription page')
             logging.info(f'license_info: {license_info}')
             logging.info(f'Page content preview: {self.driver.find_element("tag name", "body").text[:500]}')
-            try:
-                with open('debug_subscription_detail.html', 'w', encoding='utf-8') as f:
-                    f.write(self.driver.page_source)
-                self.driver.save_screenshot('debug_subscription_detail.png')
-                logging.info('Saved debug_subscription_detail.html and debug_subscription_detail.png')
-                # Also save text content (body text)
-                with open('debug_subscription_detail.txt', 'w', encoding='utf-8') as f:
-                    f.write(self.driver.find_element("tag name", "body").text)
-                logging.info('Saved debug_subscription_detail.txt with page text')
-
-                # Additionally capture the full page text via JS (document.documentElement.innerText)
+            if generate_debug_artifacts_enabled():
                 try:
-                    full_text = self.driver.execute_script("return document.documentElement.innerText") or ''
-                    with open('debug_subscription_full_text.txt', 'w', encoding='utf-8') as f:
-                        f.write(full_text)
-                    logging.info('Saved debug_subscription_full_text.txt with full page text')
+                    with open('debug_subscription_detail.html', 'w', encoding='utf-8') as f:
+                        f.write(self.driver.page_source)
+                    self.driver.save_screenshot('debug_subscription_detail.png')
+                    logging.info('Saved debug_subscription_detail.html and debug_subscription_detail.png')
+                    # Also save text content (body text)
+                    with open('debug_subscription_detail.txt', 'w', encoding='utf-8') as f:
+                        f.write(self.driver.find_element("tag name", "body").text)
+                    logging.info('Saved debug_subscription_detail.txt with page text')
+
+                    # Additionally capture the full page text via JS (document.documentElement.innerText)
+                    try:
+                        full_text = self.driver.execute_script("return document.documentElement.innerText") or ''
+                        with open('debug_subscription_full_text.txt', 'w', encoding='utf-8') as f:
+                            f.write(full_text)
+                        logging.info('Saved debug_subscription_full_text.txt with full page text')
+                    except Exception as e:
+                        logging.warning(f'Could not capture full page text via JS: {e}')
                 except Exception as e:
-                    logging.warning(f'Could not capture full page text via JS: {e}')
-            except:
-                pass
+                    logging.warning(f'Could not write subscription debug files: {e}')
+            else:
+                logging.debug('Skipping subscription debug artifact writes (disabled by env)')
             raise RuntimeError('Failed to extract license key from subscription details!')
 
     def getLD(self):
