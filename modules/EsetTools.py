@@ -476,6 +476,15 @@ class EsetKeygen(object):
                     self.driver.save_screenshot('debug_onboarding_stuck.png')
                 except:
                     pass
+                # Also attempt to capture the UI state (buttons, radios, small page text) for CI inspection
+                try:
+                    state = self.driver.execute_script("return (function(){ var res={}; res.bodyText = document.body.innerText.slice(0,4000); res.buttons = Array.from(document.querySelectorAll('button')).map(b=>({text:(b.innerText||'').trim(), disabled:!!b.disabled, ariaDisabled:b.getAttribute('aria-disabled')})); res.radios = Array.from(document.querySelectorAll('input[type=radio]')).map(r=>({id:r.id, name:r.name, checked:!!r.checked})); return res; })();")
+                    import json
+                    with open('debug_onboarding_state.json','w',encoding='utf-8') as f:
+                        json.dump(state, f, indent=2)
+                    logging.info('Saved debug_onboarding_state.json')
+                except Exception as E:
+                    logging.warning(f'Could not save debug_onboarding_state.json: {E}')
                 raise RuntimeError('Cannot bypass onboarding - ESET enforces mandatory onboarding flow')
         
         # After onboarding is complete, the trial subscription is already activated
