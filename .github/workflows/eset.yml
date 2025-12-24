@@ -62,6 +62,11 @@ on:
         required: false
         type: boolean
         default: false
+      generate_debug_artifacts:
+        description: 'Upload debug artifacts (debug_*)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   generate-account-and-key:
@@ -78,6 +83,9 @@ jobs:
             echo "key_type=${{ github.event.inputs.key_type }}" >> $GITHUB_OUTPUT
             echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
             echo "use_vpn=${{ github.event.inputs.use_vpn }}" >> $GITHUB_OUTPUT
+            echo "generate_debug_artifacts=${{ github.event.inputs.generate_debug_artifacts }}" >> $GITHUB_OUTPUT
+            # Export to the job environment so Python can read it
+            echo "GENERATE_DEBUG_ARTIFACTS=${{ github.event.inputs.generate_debug_artifacts }}" >> $GITHUB_ENV
           else #if fallback then
             echo "account=0" >> $GITHUB_OUTPUT
             echo "key=1" >> $GITHUB_OUTPUT
@@ -85,6 +93,8 @@ jobs:
             echo "key_type=--key" >> $GITHUB_OUTPUT
             echo "branch=main" >> $GITHUB_OUTPUT
             echo "use_vpn=false" >> $GITHUB_OUTPUT
+            echo "generate_debug_artifacts=false" >> $GITHUB_OUTPUT
+            echo "GENERATE_DEBUG_ARTIFACTS=false" >> $GITHUB_ENV
           fi
 
       - name: Set Email API Keys
@@ -223,6 +233,8 @@ jobs:
           python -m venv venv
           .\venv\Scripts\pip install -r requirements.txt
           .\venv\Scripts\Activate.ps1
+          # Export GENERATE_DEBUG_ARTIFACTS into the job environment for Python to read
+          Write-Output "GENERATE_DEBUG_ARTIFACTS=${{ github.event.inputs.generate_debug_artifacts }}" | Out-File -FilePath $env:GITHUB_ENV -Append
 
           $ACCOUNT = "${{ steps.vars.outputs.account }}"
           $KEY = "${{ steps.vars.outputs.key }}"
@@ -307,6 +319,14 @@ jobs:
           path: |
             *ACCOUNTS.txt
             *KEYS.txt
+          if-no-files-found: ignore
+
+      - name: Upload Debug Artifacts
+        if: always() && steps.vars.outputs.generate_debug_artifacts == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eset-debug-${{ github.run_number }}
+          path: |
             debug_trial_page.html
             debug_trial_page.png
             debug_onboarding_stuck.html
@@ -318,40 +338,4 @@ jobs:
             debug_subscription_full_text.txt
             debug_subscriptions_page.html
             debug_subscriptions_page.png
-          if-no-files-found: ignore
-
-  reproduce-local-cli:
-    name: Reproduce Local CLI (Windows)
-    runs-on: windows-latest
-    timeout-minutes: 60
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.vars.outputs.branch }}
-
-      - name: Setup Python & Dependencies
-        shell: pwsh
-        run: |
-          python -m venv venv
-          .\venv\Scripts\pip install -r requirements.txt
-          .\venv\Scripts\Activate.ps1
-
-      - name: Run same CLI as local (reproduce)
-        shell: pwsh
-        run: |
-          echo "Running reproduce command"
-          python main.py --auto-detect-browser --key --email-api emailfake --skip-update-check --no-logo --disable-logging
-
-      - name: Collect reproduce artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: reproduce-${{ github.run_number }}
-          path: |
-            debug_onboarding_stuck.html
-            debug_onboarding_stuck.png
-            debug_onboarding_state.json
-            debug_subscription_detail.html
-            debug_subscription_full_text.txt
           if-no-files-found: ignore
