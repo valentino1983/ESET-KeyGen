@@ -7,8 +7,38 @@ import colorama
 import logging
 import time
 import sys
+import random
 
 SILENT_MODE = '--silent' in sys.argv
+
+# Random name lists for generating realistic names
+FIRST_NAMES = [
+    'James', 'Mary', 'John', 'Patricia', 'Robert', 'Jennifer', 'Michael', 'Linda',
+    'William', 'Barbara', 'David', 'Elizabeth', 'Richard', 'Susan', 'Joseph', 'Jessica',
+    'Thomas', 'Sarah', 'Charles', 'Karen', 'Christopher', 'Nancy', 'Daniel', 'Lisa',
+    'Matthew', 'Betty', 'Anthony', 'Margaret', 'Mark', 'Sandra', 'Donald', 'Ashley',
+    'Steven', 'Kimberly', 'Paul', 'Emily', 'Andrew', 'Donna', 'Joshua', 'Michelle',
+    'Kevin', 'Carol', 'Brian', 'Amanda', 'George', 'Dorothy', 'Edward', 'Melissa',
+    'Ronald', 'Deborah', 'Timothy', 'Stephanie', 'Jason', 'Rebecca', 'Jeffrey', 'Sharon',
+    'Ryan', 'Laura', 'Jacob', 'Cynthia', 'Gary', 'Kathleen', 'Nicholas', 'Amy'
+]
+
+LAST_NAMES = [
+    'Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis',
+    'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas',
+    'Taylor', 'Moore', 'Jackson', 'Martin', 'Lee', 'Perez', 'Thompson', 'White',
+    'Harris', 'Sanchez', 'Clark', 'Ramirez', 'Lewis', 'Robinson', 'Walker', 'Young',
+    'Allen', 'King', 'Wright', 'Scott', 'Torres', 'Nguyen', 'Hill', 'Flores',
+    'Green', 'Adams', 'Nelson', 'Baker', 'Hall', 'Rivera', 'Campbell', 'Mitchell',
+    'Carter', 'Roberts', 'Gomez', 'Phillips', 'Evans', 'Turner', 'Diaz', 'Parker',
+    'Cruz', 'Edwards', 'Collins', 'Reyes', 'Stewart', 'Morris', 'Morales', 'Murphy'
+]
+
+def generate_random_name():
+    """Generate a random realistic full name"""
+    first_name = random.choice(FIRST_NAMES)
+    last_name = random.choice(LAST_NAMES)
+    return f"{first_name} {last_name}"
 
 class IPBlockedException(Exception):
     def __init__(self, message):
@@ -127,142 +157,466 @@ class EsetKeygen(object):
         logging.info(f'[{self.mode}] Request sending...')
         console_log(f'\n[{self.mode}] Request sending...', INFO, silent_mode=SILENT_MODE)
         
-        # First, ensure we're logged in by visiting home page
-        self.driver.get('https://home.eset.com/')
-        time.sleep(2)
+        # After account confirmation, we should already be logged in
+        # Check current URL first before navigating
+        current_url_after_confirm = self.driver.current_url.lower()
+        logging.info(f'URL after account confirmation: {self.driver.current_url}')
+        
+        # If we're already on home.eset.com, great! If not, navigate there
+        if 'home.eset.com' not in current_url_after_confirm:
+            logging.info('Not on home.eset.com, navigating there...')
+            self.driver.get('https://home.eset.com/')
+            time.sleep(3)  # Initial wait
+        else:
+            logging.info('Already on home.eset.com after confirmation')
+            time.sleep(2)  # Still wait a bit
+        
+        # Wait for the React app to fully load (check for meaningful content)
+        logging.info('Waiting for page to fully load...')
+        page_loaded = False
+        for i in range(15):  # Try for up to 30 seconds
+            time.sleep(2)
+            # Check if page has loaded by looking for actual content
+            has_content = self.driver.execute_script("""
+                var root = document.getElementById('root');
+                if (!root) return false;
+                // Check if there's actual content, not just loading divs
+                var content = root.innerText.trim();
+                return content.length > 50;  // Should have some text if loaded
+            """)
+            if has_content:
+                logging.info('Page content loaded')
+                page_loaded = True
+                break
+            logging.info(f'Waiting for page content... ({i+1}/15)')
+        
+        if not page_loaded:
+            logging.warning('Page may not have fully loaded, continuing anyway...')
+        
+        current_url = self.driver.current_url.lower()
+        logging.info(f'Current URL before onboarding check: {self.driver.current_url}')
         
         # Check if redirected to login (session expired)
-        if 'login' in self.driver.current_url.lower():
+        if 'login' in current_url:
             raise RuntimeError('Session expired or not logged in! Please ensure account is confirmed.')
         
         # Check if we're on the onboarding page
-        if 'onboarding' in self.driver.current_url.lower():
+        if 'onboarding' in current_url:
             logging.info('Detected onboarding page, attempting bypass...')
             console_log('\nDetected onboarding page, attempting bypass...', INFO, silent_mode=SILENT_MODE)
             
-            # Strategy: Instead of trying to interact with onboarding, immediately navigate to trial page
-            # ESET may redirect us back, but let's try
-            logging.info('Attempting direct navigation to trial page...')
-            self.driver.get('https://home.eset.com/subscriptions/choose-trial')
-            time.sleep(3)
+            # Strategy: Complete the onboarding flow properly
+            logging.warning('Onboarding is mandatory, completing flow...')
+            console_log('Onboarding is mandatory, completing flow...', INFO, silent_mode=SILENT_MODE)
             
-            # Check if we were redirected back to onboarding
-            if 'onboarding' in self.driver.current_url.lower():
-                logging.warning('Redirected back to onboarding, trying to complete flow...')
-                console_log('Onboarding is mandatory, completing flow...', INFO, silent_mode=SILENT_MODE)
-                
-                # Go back to onboarding and try to complete it
-                self.driver.get('https://home.eset.com/onboarding/welcome')
-                time.sleep(2)
-                
-                # Try using JavaScript to complete the onboarding by simulating completion
-                try:
-                    # Try to find and click Continue button multiple times
-                    for step in range(4):  # 3 slides max
-                        logging.info(f'Onboarding step {step+1}/4...')
-                        
-                        # Use explicit WebDriver wait with EC for button to be clickable
+            # Try using JavaScript to complete the onboarding
+            try:
+                max_attempts = 20  # Increased for all onboarding steps
+                for step in range(max_attempts):
+                    time.sleep(2)  # Wait for page to stabilize
+                    
+                    current_url = self.driver.current_url.lower()
+                    logging.info(f'Onboarding step {step+1}/{max_attempts}, URL: {self.driver.current_url}')
+                    
+                    # Check if we've left onboarding
+                    if 'onboarding' not in current_url:
+                        logging.info('Successfully left onboarding!')
+                        console_log('Onboarding completed!', OK, silent_mode=SILENT_MODE)
+                        break
+                    
+                    # Strategy: Handle different onboarding screens in order
+                    action_taken = False
+                    
+                    # Step 1: Skip introduction on welcome page
+                    skip_intro = self.driver.execute_script("""
+                        var skipBtn = document.querySelector('button');
+                        if (skipBtn && skipBtn.innerText.toLowerCase().includes('skip introduction')) {
+                            skipBtn.click();
+                            return true;
+                        }
+                        return false;
+                    """)
+                    if skip_intro:
+                        logging.info('Clicked Skip Introduction')
+                        action_taken = True
+                        time.sleep(2)
+                        continue
+                    
+                    # Step 2a: Select "Start a 30-day trial" option (more aggressive)
+                    trial_selected = False
+                    try:
+                        trial_selected = self.driver.execute_script("""
+                            (function(){
+                                var debug = { success: false, inputChecked: false, buttons: [] };
+                                var trialLabel = document.querySelector('label[data-label="onboarding-add-subscription-protect-card-trial"]');
+                                var input = document.getElementById('trial') || (trialLabel && trialLabel.querySelector('input')) || null;
+                                // Try clicking label and input with mouse events
+                                try {
+                                    if (trialLabel) {
+                                        trialLabel.scrollIntoView({block: 'center'});
+                                        trialLabel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                                        trialLabel.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                                        trialLabel.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                                    }
+                                } catch(e) {}
+                                try {
+                                    if (input) {
+                                        input.click();
+                                        input.checked = true;
+                                        input.setAttribute('checked', '');
+                                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                                        input.dispatchEvent(new Event('blur', { bubbles: true }));
+                                        input.focus();
+                                        input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                                        debug.inputChecked = !!input.checked;
+                                    }
+                                } catch(e) { }
+
+                                // Set aria attributes on radio elements if present
+                                try {
+                                    if (trialLabel) {
+                                        trialLabel.setAttribute('aria-checked', 'true');
+                                    }
+                                } catch(e) {}
+
+                                var buttons = Array.from(document.querySelectorAll('button'));
+                                for (var i=0;i<buttons.length;i++){
+                                    var btn = buttons[i];
+                                    var txt = (btn.innerText||'').toLowerCase().trim();
+                                    var b = { text: txt, disabled: !!btn.disabled, ariaDisabled: btn.getAttribute('aria-disabled') };
+                                    debug.buttons.push(b);
+                                    if (txt === 'continue') {
+                                        try {
+                                            // try to enable it
+                                            btn.removeAttribute('disabled');
+                                            btn.setAttribute('aria-disabled', 'false');
+                                            btn.disabled = false;
+                                            btn.classList.remove('disabled');
+                                        } catch(e) {}
+                                        try { btn.scrollIntoView({block:'center'}); btn.click(); debug.success = true; return debug; } catch(e) { }
+                                    }
+                                }
+
+                                // Last attempt: find any element with data-label containing 'continue' and click
+                                try {
+                                    var cont = document.querySelector('[data-label*="continue"]');
+                                    if (cont) { cont.click(); debug.success = true; }
+                                } catch(e) {}
+
+                                return debug;
+                            })();
+                        """)
+                        # trial_selected will be a dict-like object from JS; convert to truthy
+                        if isinstance(trial_selected, dict):
+                            logging.info(f"Trial JS result: {trial_selected}")
+                            action_taken = trial_selected.get('success', False) or trial_selected.get('inputChecked', False)
+                            if action_taken:
+                                trial_selected = True
+                            else:
+                                trial_selected = False
+                        else:
+                            trial_selected = bool(trial_selected)
+                    except Exception as E:
+                        logging.debug(f'Trial selection JS error: {E}')
+                        trial_selected = False
+
+                    if trial_selected:
+                        logging.info('Selected trial option (aggressive)')
+                        action_taken = True
+                        time.sleep(1)
+                    else:
+                        # Save additional state to help CI debugging
                         try:
-                            # Try JavaScript click instead of Selenium click
-                            js_click_result = self.driver.execute_script("""
-                                var btn = document.querySelector('[data-label="onboarding-welcome-continue-btn"]');
-                                if (btn) {
-                                    btn.click();
+                            state = self.driver.execute_script("return (function(){ var res = {}; res.bodyText = document.body.innerText.slice(0,2000); res.buttons = Array.from(document.querySelectorAll('button')).map(b=>({text:(b.innerText||'').trim(), disabled:!!b.disabled, ariaDisabled:b.getAttribute('aria-disabled')})); res.radios = Array.from(document.querySelectorAll('input[type=radio]')).map(r=>({id:r.id, name:r.name, checked:!!r.checked})); return res; })();")
+                            with open('debug_onboarding_state.json','w',encoding='utf-8') as f:
+                                import json
+                                json.dump(state, f, indent=2)
+                            logging.info('Saved debug_onboarding_state.json')
+                        except Exception:
+                            pass
+
+                    
+                    # Step 2b: Select "Protect your home" option (if present)
+                    home_selected = self.driver.execute_script("""
+                        // Look for "Protect your home" option
+                        var labels = document.querySelectorAll('label[tabindex="0"]');
+                        for (var i = 0; i < labels.length; i++) {
+                            var text = labels[i].innerText.toLowerCase();
+                            if (text.includes('protect your home') || text.includes('home')) {
+                                var input = labels[i].querySelector('input[type="radio"]');
+                                if (input && !input.checked) {
+                                    labels[i].click();
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    """)
+                    if home_selected:
+                        logging.info('Selected Protect your home option')
+                        action_taken = True
+                        time.sleep(1)
+                    
+                    # Step 3a: Fill in member name (if input field is present) and submit form
+                    try:
+                        name_input = self.driver.find_element('css selector', 'input[name="name"]')
+                        if name_input and name_input.get_attribute('value').strip() == '':
+                            random_name = generate_random_name()
+                            logging.info(f'Found empty name field, filling with: {random_name}')
+                            name_input.click()  # Focus the field
+                            time.sleep(0.1)
+                            name_input.send_keys(random_name)  # Selenium's send_keys triggers all keyboard events
+                            time.sleep(0.5)
+                            
+                            # Dispatch change and blur events
+                            self.driver.execute_script("""
+                                var nameInput = arguments[0];
+                                nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                nameInput.dispatchEvent(new Event('blur', { bubbles: true }));
+                            """, name_input)
+                            
+                            logging.info('Filled member name, waiting for Continue button to enable')
+                            time.sleep(1)
+                            
+                            # Try to click continue button
+                            continue_clicked = self.driver.execute_script("""
+                                var continueBtn = document.querySelector('button[data-label="onboarding-members-continue-btn"]');
+                                if (continueBtn && !continueBtn.disabled) {
+                                    continueBtn.click();
                                     return true;
                                 }
                                 return false;
                             """)
                             
-                            if js_click_result:
-                                logging.info(f'JS click succeeded at step {step+1}')
-                                time.sleep(3)  # Wait for animation/navigation
-                                
-                                # Check if we left onboarding
-                                if 'onboarding' not in self.driver.current_url.lower():
-                                    logging.info('Left onboarding after JS click!')
-                                    console_log('Onboarding completed!', OK, silent_mode=SILENT_MODE)
-                                    break
-                            else:
-                                logging.warning(f'JS click failed at step {step+1}')
-                                break
-                        except Exception as e:
-                            logging.error(f'Error clicking at step {step+1}: {e}')
-                            break
-                except Exception as e:
-                    logging.warning(f'Error during onboarding: {e}')
-                
-                # Final check - if still on onboarding, raise error
-                if 'onboarding' in self.driver.current_url.lower():
-                    logging.error(f'Still on onboarding after all attempts. URL: {self.driver.current_url}')
-                    # Save debug info
-                    try:
-                        with open('debug_onboarding_stuck.html', 'w', encoding='utf-8') as f:
-                            f.write(self.driver.page_source)
-                        self.driver.save_screenshot('debug_onboarding_stuck.png')
+                            if continue_clicked:
+                                logging.info('Clicked Continue button after name fill')
+                                action_taken = True
+                                time.sleep(2)
+                                continue
                     except:
                         pass
-                    raise RuntimeError('Cannot bypass onboarding - ESET enforces mandatory onboarding flow')
-            else:
-                logging.info('Successfully bypassed onboarding with direct navigation!')
-                console_log('Onboarding bypassed!', OK, silent_mode=SILENT_MODE)
-        else:
-            # Not on onboarding page, navigate to trial page
-            logging.info('Navigating to trial subscription page...')
-            self.driver.get('https://home.eset.com/subscriptions/choose-trial')
-            time.sleep(5)  # Wait for page load
+                    
+                    # Step 3b: Select "Just me" option (if present)
+                    just_me_selected = self.driver.execute_script("""
+                        var justMeLabel = document.querySelector('label[data-label="onboarding-members-me-option"]');
+                        if (justMeLabel) {
+                            var input = justMeLabel.querySelector('input');
+                            if (input && !input.checked) {
+                                justMeLabel.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    """)
+                    if just_me_selected:
+                        logging.info('Selected Just me option')
+                        action_taken = True
+                        time.sleep(1)
+                    
+                    # Step 4: Click "Finish for now" button (final step)
+                    finish_clicked = self.driver.execute_script("""
+                        var buttons = document.querySelectorAll('button');
+                        for (var i = 0; i < buttons.length; i++) {
+                            var btn = buttons[i];
+                            var text = btn.innerText.toLowerCase();
+                            if (text.includes('finish for now')) {
+                                btn.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    """)
+                    if finish_clicked:
+                        logging.info('Clicked Finish for now')
+                        action_taken = True
+                        time.sleep(3)
+                        continue
+                    
+                    # Generic: Try to click any enabled Continue button
+                    continue_clicked = self.driver.execute_script("""
+                        // Look for Continue buttons
+                        var buttons = document.querySelectorAll('button:not([disabled])');
+                        for (var i = 0; i < buttons.length; i++) {
+                            var btn = buttons[i];
+                            if (btn.getAttribute('aria-disabled') === 'true') continue;
+                            
+                            var btnText = btn.innerText.toLowerCase().trim();
+                            if (btnText === 'continue') {
+                                btn.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    """)
+                    
+                    if continue_clicked:
+                        logging.info('Clicked Continue button')
+                        action_taken = True
+                        time.sleep(2)
+                    
+                    # If no action was taken, we might be stuck
+                    if not action_taken:
+                        logging.warning(f'No actionable element found on current onboarding page')
+                        time.sleep(1)
+                
+                # After completing onboarding steps, give it time to settle
+                time.sleep(3)
+                
+            except Exception as e:
+                logging.warning(f'Error during onboarding: {e}')
+            
+            # Final check - if still on onboarding, raise error
+            if 'onboarding' in self.driver.current_url.lower():
+                logging.error(f'Still on onboarding after all attempts. URL: {self.driver.current_url}')
+                # Save debug info
+                try:
+                    with open('debug_onboarding_stuck.html', 'w', encoding='utf-8') as f:
+                        f.write(self.driver.page_source)
+                    self.driver.save_screenshot('debug_onboarding_stuck.png')
+                except:
+                    pass
+                # Also attempt to capture the UI state (buttons, radios, small page text) for CI inspection
+                try:
+                    state = self.driver.execute_script("return (function(){ var res={}; res.bodyText = document.body.innerText.slice(0,4000); res.buttons = Array.from(document.querySelectorAll('button')).map(b=>({text:(b.innerText||'').trim(), disabled:!!b.disabled, ariaDisabled:b.getAttribute('aria-disabled')})); res.radios = Array.from(document.querySelectorAll('input[type=radio]')).map(r=>({id:r.id, name:r.name, checked:!!r.checked})); return res; })();")
+                    import json
+                    with open('debug_onboarding_state.json','w',encoding='utf-8') as f:
+                        json.dump(state, f, indent=2)
+                    logging.info('Saved debug_onboarding_state.json')
+                except Exception as E:
+                    logging.warning(f'Could not save debug_onboarding_state.json: {E}')
+                raise RuntimeError('Cannot bypass onboarding - ESET enforces mandatory onboarding flow')
         
-        # Check again if redirected to login
+        # After onboarding is complete, the trial subscription is already activated
+        # Navigate to subscriptions page to extract the license key
+        logging.info('Onboarding complete! Now navigating to subscriptions to retrieve license key...')
+        time.sleep(2)
+        
+        # Navigate to subscriptions page
+        self.driver.get('https://home.eset.com/subscriptions')
+        time.sleep(5)  # Wait for page load
+        
+        logging.info(f'Current URL: {self.driver.current_url}')
+        
+        # Check if redirected to login
         if 'login' in self.driver.current_url.lower():
-            raise RuntimeError('Cannot access trial page - authentication required!')
+            logging.error(f'Redirected to login page. URL: {self.driver.current_url}')
+            raise RuntimeError('Session expired - redirected to login!')
         
-        # Check if we got redirected back to onboarding
-        if 'onboarding' in self.driver.current_url.lower():
-            logging.error(f'Redirected back to onboarding! Current URL: {self.driver.current_url}')
-            raise RuntimeError('Cannot bypass onboarding - keeps redirecting back')
+        # Wait for subscriptions page to load and find the subscription card
+        logging.info('Looking for subscription card...')
+        subscription_found = False
+        for attempt in range(10):
+            subscription_text = self.driver.execute_script("""
+                var text = document.body.innerText.toLowerCase();
+                return text.includes('subscription') || text.includes('eset');
+            """)
+            if subscription_text:
+                subscription_found = True
+                logging.info('Subscription content found on page')
+                break
+            time.sleep(1)
         
-        logging.info(f'On trial page: {self.driver.current_url}')
+        if not subscription_found:
+            logging.warning('Could not verify subscription content, continuing anyway...')
         
-        # Try to find the button with increased timeout and better error message
-        try:
-            uCE(self.driver, f"return {GET_EBAV}('button', 'data-label', 'subscription-choose-trial-ehsp-card-button') != null", max_iter=50, delay=1)
-        except RuntimeError as e:
-            # Debug: save page source and screenshot for troubleshooting
-            logging.error(f'Button not found! Current URL: {self.driver.current_url}')
-            logging.error(f'Page title: {self.driver.title}')
+        # Click the "Open subscription" button
+        logging.info('Looking for "Open subscription" button...')
+        open_subscription_clicked = False
+        for attempt in range(10):
+            button_clicked = self.driver.execute_script("""
+                var buttons = document.querySelectorAll('button');
+                for (var i = 0; i < buttons.length; i++) {
+                    var btn_text = buttons[i].innerText.toLowerCase().trim();
+                    if (btn_text === 'open subscription') {
+                        buttons[i].click();
+                        return true;
+                    }
+                }
+                return false;
+            """)
+            if button_clicked:
+                open_subscription_clicked = True
+                logging.info('Successfully clicked "Open subscription" button')
+                time.sleep(3)  # Wait for subscription detail page to load
+                break
+            time.sleep(1)
+        
+        if not open_subscription_clicked:
+            logging.error('Could not find or click "Open subscription" button')
             try:
-                with open('debug_trial_page.html', 'w', encoding='utf-8') as f:
+                with open('debug_subscriptions_page.html', 'w', encoding='utf-8') as f:
                     f.write(self.driver.page_source)
-                self.driver.save_screenshot('debug_trial_page.png')
-                logging.error('Debug files saved: debug_trial_page.html and debug_trial_page.png')
+                self.driver.save_screenshot('debug_subscriptions_page.png')
+                logging.info('Saved debug_subscriptions_page.html and debug_subscriptions_page.png')
             except:
                 pass
-            raise RuntimeError(f'Trial button not found! Page may have changed structure. {str(e)}')
+            raise RuntimeError('Could not access subscription details!')
         
-        if self.mode == 'ESET HOME':
-            uCE(self.driver, f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'subscription-choose-trial-ehsp-card-button'))")
-        elif self.mode == 'SMALL BUSINESS':
-            uCE(self.driver, f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'subscription-choose-trial-esbs-card-button'))")
-        try:
-            for button in self.driver.find_elements('tag name', 'button'):
-                if button.get_attribute('innerText').strip().lower() == 'continue':
-                    button.click()
-                    break
-                time.sleep(0.05)
-            else:
-                raise RuntimeError('Continue button error!')
-            uCE(self.driver, f"return {CLICK_WITH_BOOL}({GET_EBAV}('button', 'data-label', 'subscription-choose-trial-esbs-card-button'))")
-            time.sleep(1)
-            for button in self.driver.find_elements('tag name', 'button'):
-                if button.get_attribute('innerText').strip().lower() == 'continue':
-                    button.click()
-                    break
-                time.sleep(0.05)
-            else:
-                raise RuntimeError('Continue button error!')
-            logging.info(f'[{self.mode}] Request successfully sent!')
-            console_log(f'[{self.mode}] Request successfully sent!', OK, silent_mode=SILENT_MODE)
-        except:
-            raise RuntimeError('Request sending error!!!')
+        # Extract the license key and expiration date from the subscription detail page
+        logging.info('Extracting license key and expiration date...')
+        license_info = self.driver.execute_script("""
+            var result = {
+                activation_key: null,
+                expiration_date: null,
+                found_by: null
+            };
+
+            // Get all text content
+            var all_text = document.body.innerText || '';
+
+            // Try to find activation key following the label "Activation key" (case-insensitive)
+            var activation_match = all_text.match(/activation key[\\s\\S]*?([A-Z0-9]{4}(?:-[A-Z0-9]{4}){4})/i);
+            if (activation_match && activation_match[1]) {
+                result.activation_key = activation_match[1].toUpperCase();
+                result.found_by = 'activation_label';
+            } else {
+                // Fallback: search for any 5-group license-like pattern anywhere on the page
+                var key_match = all_text.match(/[A-Z0-9]{4}(?:-[A-Z0-9]{4}){4}/i);
+                if (key_match && key_match[0]) {
+                    result.activation_key = key_match[0].toUpperCase();
+                    result.found_by = 'pattern_fallback';
+                }
+            }
+
+            // Look for expiration date - search for "Expiration date" followed by DD.MM.YYYY format
+            var expiration_match = all_text.match(/[Ee]xpiration date[\\s\\S]*?(\\d{2}\\.\\d{2}\\.\\d{4})/);
+            if (expiration_match && expiration_match[1]) {
+                result.expiration_date = expiration_match[1];
+            }
+
+            return result;
+        """)
+        
+        if license_info['activation_key']:
+            logging.info(f'[{self.mode}] License key: {license_info["activation_key"]}')
+            logging.info(f'[{self.mode}] Expiration date: {license_info["expiration_date"]}')
+            console_log(f'\n[{self.mode}] Request successfully sent!', OK, silent_mode=SILENT_MODE)
+        else:
+            logging.error('Could not extract license key from subscription page')
+            logging.info(f'license_info: {license_info}')
+            logging.info(f'Page content preview: {self.driver.find_element("tag name", "body").text[:500]}')
+            try:
+                with open('debug_subscription_detail.html', 'w', encoding='utf-8') as f:
+                    f.write(self.driver.page_source)
+                self.driver.save_screenshot('debug_subscription_detail.png')
+                logging.info('Saved debug_subscription_detail.html and debug_subscription_detail.png')
+                # Also save text content (body text)
+                with open('debug_subscription_detail.txt', 'w', encoding='utf-8') as f:
+                    f.write(self.driver.find_element("tag name", "body").text)
+                logging.info('Saved debug_subscription_detail.txt with page text')
+
+                # Additionally capture the full page text via JS (document.documentElement.innerText)
+                try:
+                    full_text = self.driver.execute_script("return document.documentElement.innerText") or ''
+                    with open('debug_subscription_full_text.txt', 'w', encoding='utf-8') as f:
+                        f.write(full_text)
+                    logging.info('Saved debug_subscription_full_text.txt with full page text')
+                except Exception as e:
+                    logging.warning(f'Could not capture full page text via JS: {e}')
+            except:
+                pass
+            raise RuntimeError('Failed to extract license key from subscription details!')
 
     def getLD(self):
         exec_js = self.driver.execute_script

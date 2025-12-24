@@ -88,11 +88,15 @@ jobs:
           fi
 
       - name: Set Email API Keys
+        if: ${{ steps.vars.outputs.mail == 'mailslurp' || steps.vars.outputs.mail == 'mailsac' }}
         shell: bash
         run: |
-          # Set API keys from GitHub Secrets if using MailSlurp or Mailsac
-          [[ -n "${{ secrets.MAILSLURP_API_KEY }}" ]] && echo "MAILSLURP_API_KEY=${{ secrets.MAILSLURP_API_KEY }}" >> $GITHUB_ENV
-          [[ -n "${{ secrets.MAILSAC_API_KEY }}" ]] && echo "MAILSAC_API_KEY=${{ secrets.MAILSAC_API_KEY }}" >> $GITHUB_ENV
+          # Set API keys from GitHub Secrets only when the selected mail provider requires them
+          if [[ "${{ steps.vars.outputs.mail }}" == "mailslurp" ]]; then
+            [[ -n "${{ secrets.MAILSLURP_API_KEY }}" ]] && echo "MAILSLURP_API_KEY=${{ secrets.MAILSLURP_API_KEY }}" >> $GITHUB_ENV
+          elif [[ "${{ steps.vars.outputs.mail }}" == "mailsac" ]]; then
+            [[ -n "${{ secrets.MAILSAC_API_KEY }}" ]] && echo "MAILSAC_API_KEY=${{ secrets.MAILSAC_API_KEY }}" >> $GITHUB_ENV
+          fi
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -307,4 +311,47 @@ jobs:
             debug_trial_page.png
             debug_onboarding_stuck.html
             debug_onboarding_stuck.png
+            debug_onboarding_state.json
+            debug_subscription_detail.html
+            debug_subscription_detail.png
+            debug_subscription_detail.txt
+            debug_subscription_full_text.txt
+            debug_subscriptions_page.html
+            debug_subscriptions_page.png
+          if-no-files-found: ignore
+
+  reproduce-local-cli:
+    name: Reproduce Local CLI (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.vars.outputs.branch }}
+
+      - name: Setup Python & Dependencies
+        shell: pwsh
+        run: |
+          python -m venv venv
+          .\venv\Scripts\pip install -r requirements.txt
+          .\venv\Scripts\Activate.ps1
+
+      - name: Run same CLI as local (reproduce)
+        shell: pwsh
+        run: |
+          echo "Running reproduce command"
+          python main.py --auto-detect-browser --key --email-api emailfake --skip-update-check --no-logo --disable-logging
+
+      - name: Collect reproduce artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproduce-${{ github.run_number }}
+          path: |
+            debug_onboarding_stuck.html
+            debug_onboarding_stuck.png
+            debug_onboarding_state.json
+            debug_subscription_detail.html
+            debug_subscription_full_text.txt
           if-no-files-found: ignore
