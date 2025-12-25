@@ -7,7 +7,30 @@ import colorama
 import logging
 import time
 import sys
+import io
+import base64
+import re
 import random
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
+from twocaptcha import TwoCaptcha
+
+# Optional OCR dependencies (pytesseract + Pillow)
+try:
+    import pytesseract
+    from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+    OCR_AVAILABLE = True
+except Exception:
+    pytesseract = None
+    Image = None
+    ImageEnhance = None
+    ImageFilter = None
+    ImageOps = None
+    OCR_AVAILABLE = False
 
 SILENT_MODE = '--silent' in sys.argv
 
@@ -17,6 +40,30 @@ import os
 def generate_debug_artifacts_enabled():
     """Return True if GENERATE_DEBUG_ARTIFACTS env var is set to a truthy value."""
     return os.getenv('GENERATE_DEBUG_ARTIFACTS', 'false').lower() in ('1', 'true', 'yes')
+
+def ensure_tesseract_path():
+    """Ensure pytesseract knows the path to the tesseract executable on Windows.
+    Returns True if path looks good, False otherwise.
+    """
+    if not OCR_AVAILABLE:
+        return False
+    try:
+        # If already set and exists, we're good
+        cmd = pytesseract.pytesseract.tesseract_cmd
+        if cmd and os.path.exists(cmd):
+            return True
+    except Exception:
+        pass
+    # Try common Windows install location
+    common = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.exists(common):
+        try:
+            pytesseract.pytesseract.tesseract_cmd = common
+            return True
+        except Exception:
+            return False
+    # Otherwise give a clear message
+    return False
 
 # Random name lists for generating realistic names
 FIRST_NAMES = [
@@ -711,6 +758,710 @@ class EsetProtectHubRegister(object):
         self.driver = driver
         self.eset_password = eset_password
         self.window_handle = None
+
+    def solve_mtcaptcha_simple_ocr(self):
+        """
+        Simple OCR method without OpenCV - works on Windows
+        """
+        try:
+            print("[  INFO  ] Attempting OCR captcha solving...")
+
+            if not OCR_AVAILABLE:
+                print('[  WARN  ] pytesseract or Pillow are not installed. Install with: pip install pytesseract Pillow and ensure Tesseract executable is available.')
+                return False
+
+            if not ensure_tesseract_path():
+                print('[  WARN  ] Tesseract executable not found. Install Tesseract OCR and ensure the path is correct (or set pytesseract.pytesseract.tesseract_cmd).')
+                return False
+
+            try:
+                print('Tesseract path:', pytesseract.pytesseract.tesseract_cmd)
+                print('Tesseract version:', pytesseract.get_tesseract_version())
+                print('OCR is ready!')
+            except Exception as e:
+                print('[  WARN  ] Tesseract check failed:', e)
+                return False
+
+            # Switch to iframe
+            iframe = self.driver.find_element(By.ID, "register-captcha-iframe-1")
+            self.driver.switch_to.frame(iframe)
+            time.sleep(2)
+
+            # Get captcha image
+            captcha_img = self.driver.find_element(By.ID, "mtcap-image-1")
+
+            # Extract base64 from style attribute
+            style = captcha_img.get_attribute("style")
+            if "base64," in style:
+                base64_match = re.search(r'base64,([^"\']+)', style)
+                if base64_match:
+                    base64_data = base64_match.group(1)
+                    captcha_text = self._simple_ocr_process(base64_data)
+
+                    if captcha_text and 4 <= len(captcha_text) <= 8:
+                        input_field = self.driver.find_element(By.ID, "mtcap-inputtext-1")
+                        input_field.clear()
+
+                        # Type slowly like a human
+                        for char in captcha_text:
+                            input_field.send_keys(char)
+                            time.sleep(0.1)
+
+                        time.sleep(1)
+
+                        # Click verify button
+                        verify_btn = self.driver.find_element(By.ID, "mtcap-statusbutton-1")
+                        verify_btn.click()
+
+                        time.sleep(2)
+
+                        # Check if successful
+                        try:
+                            status_elem = self.driver.find_element(By.ID, "mtcap-status-1")
+                            if "success" in status_elem.get_attribute("class").lower():
+                                self.driver.switch_to.default_content()
+                                print(f"[   OK   ] OCR solved: {captcha_text}")
+                                return True
+                        except:
+                            pass
+
+            self.driver.switch_to.default_content()
+            print("[  WARN  ] OCR failed")
+            return False
+
+        except Exception as e:
+            try:
+                self.driver.switch_to.default_content()
+            except:
+                pass
+            print(f"[  WARN  ] OCR error: {str(e)}")
+            return False
+    
+
+    def _simple_ocr_process(self, base64_data):
+        """
+        Simple OCR processing without OpenCV
+        """
+        try:
+            from PIL import Image, ImageEnhance
+            import io
+            import base64
+            
+            # Decode base64
+            img_data = base64.b64decode(base64_data)
+            img = Image.open(io.BytesIO(img_data))
+            
+            # Convert to grayscale
+            img = img.convert('L')
+            
+            # Enhance contrast
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(2.0)
+            
+            # OCR with optimized settings
+            custom_config = r'--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+            text = pytesseract.image_to_string(img, config=custom_config)
+            
+            # Clean the text
+            text = ''.join(filter(str.isalnum, text)).strip()
+            
+            return text if 4 <= len(text) <= 8 else None
+            
+        except Exception as e:
+            print(f"[  WARN  ] OCR processing failed: {str(e)}")
+            return None
+
+    def solve_with_capsolver_fixed(self):
+        """
+        Fixed Capsolver method without proxy requirement
+        Improvements:
+        - Use API key from environment variable `CAPSOLVER_API_KEY` (fallback to hardcoded value)
+        - Use consistent clientKey for createTask and getTaskResult
+        - Increase polling and add logging
+        - Robust token injection and verification
+        """
+        try:
+            import requests
+            import json
+            import time
+            import os
+
+            client_key = os.environ.get('CAPSOLVER_API_KEY', 'CAP-D051815FD86B044D03BF198CC9DFEB4B')
+            if client_key.startswith('CAP-') is False:
+                print('[  WARN  ] Capsolver client key looks invalid, check environment variable CAPSOLVER_API_KEY')
+
+            task_data = {
+                "clientKey": client_key,
+                "task": {
+                    "type": "MTCaptchaTaskProxyless",
+                    "websiteURL": self.driver.current_url,
+                    "websiteKey": "MTPublic-JnEM38Q6U"
+                }
+            }
+
+            response = requests.post("https://api.capsolver.com/createTask", json=task_data, timeout=30)
+            task_result = response.json()
+
+            if task_result.get('errorId', 1) != 0:
+                print(f"[  WARN  ] Capsolver error: {task_result.get('errorDescription', 'Unknown error')}")
+                return False
+
+            task_id = task_result.get('taskId')
+            if not task_id:
+                print('[  WARN  ] Capsolver did not return a taskId')
+                return False
+
+            # Poll for result (up to ~2.5 minutes)
+            for attempt in range(30):
+                time.sleep(5)
+                result_data = {"clientKey": client_key, "taskId": task_id}
+                try:
+                    result_response = requests.post("https://api.capsolver.com/getTaskResult", json=result_data, timeout=20)
+                    result = result_response.json()
+                except Exception as e:
+                    print(f"[  WARN  ] Capsolver polling error: {e}")
+                    continue
+
+                status = result.get('status')
+                if status == 'ready':
+                    solution = result.get('solution') or {}
+                    token = solution.get('token')
+                    if not token:
+                        print('[  WARN  ] Capsolver returned no token in solution')
+                        return False
+
+                    # Inject the solution token into the page
+                    self.driver.execute_script("""
+                        (function(token){
+                            var tokenField = document.querySelector('[name="mtcaptcha-verifiedtoken"]');
+                            if (!tokenField) {
+                                tokenField = document.createElement('input');
+                                tokenField.type = 'hidden';
+                                tokenField.name = 'mtcaptcha-verifiedtoken';
+                                document.forms[0].appendChild(tokenField);
+                            }
+                            tokenField.value = token;
+                            // Dispatch change events if necessary
+                            tokenField.dispatchEvent(new Event('change', { bubbles: true }));
+                        })(arguments[0]);
+                    """, token)
+
+                    print("[   OK   ] MTCaptcha solved via Capsolver")
+
+                    # Allow time for site to verify token
+                    time.sleep(2)
+
+                    # Verify presence of token on page
+                    try:
+                        verified = self.driver.execute_script('return (document.querySelector("[name=\'mtcaptcha-verifiedtoken\']") || {}).value || ""')
+                        if verified and verified.strip() != '':
+                            return True
+                    except:
+                        pass
+
+                    return True
+
+            print("[  WARN  ] Capsolver timeout")
+            return False
+
+        except Exception as e:
+            print(f"[  WARN  ] Capsolver failed: {str(e)}")
+            return False
+
+    # ORPHANED FUNCTION - Unused, superseded by solve_with_capsolver_fixed
+    # def solve_with_capsolver(self):
+    #     """
+    #     Solve MTCaptcha using Capsolver (free tier available)
+    #     """
+    #     try:
+    #         import requests
+    #         import json
+    #         import time
+    #         
+    #         # Capsolver API (get free API key from https://www.capsolver.com/)
+    #         API_KEY = "CAP-D051815FD86B044D03BF198CC9DFEB4B"  # Register for free account
+    #         
+    #         # Step 1: Create task
+    #         task_data = {
+    #             "clientKey": API_KEY,
+    #             "task": {
+    #                 "type": "MTCaptchaTask",
+    #                 "websiteURL": self.driver.current_url,
+    #                 "websiteKey": "MTPublic-JnEM38Q6U",
+    #                 "proxy": ""  # No proxy needed
+    #             }
+    #         }
+    #         
+    #         response = requests.post("https://api.capsolver.com/createTask", json=task_data)
+    #         task_result = response.json()
+    #         
+    #         if task_result['errorId'] != 0:
+    #             print(f"[  WARN  ] Capsolver error: {task_result['errorDescription']}")
+    #             return False
+    #         
+    #         task_id = task_result['taskId']
+    #         
+    #         # Step 2: Poll for result
+    #         for _ in range(30):  # 30 attempts with 2-second intervals
+    #             time.sleep(2)
+    #             
+    #             result_data = {
+    #                 "clientKey": API_KEY,
+    #                 "taskId": task_id
+    #             }
+    #             
+    #             result_response = requests.post("https://api.capsolver.com/getTaskResult", json=result_data)
+    #             result = result_response.json()
+    #             
+    #             if result['status'] == "ready":
+    #                 # Inject the solution
+    #                 self.driver.execute_script(f"""
+    #                     document.querySelector('[name="mtcaptcha-verifiedtoken"]').value = '{result['solution']['token']}';
+    #                 """)
+    #                 print("[   OK   ] MTCaptcha solved via Capsolver")
+    #                 return True
+    #                 
+    #         print("[  WARN  ] Capsolver timeout")
+    #         return False
+    #         
+    #     except Exception as e:
+    #         print(f"[  WARN  ] Capsolver failed: {str(e)}")
+    #         return False
+        
+    def solve_mtcaptcha_enhanced_ocr(self):
+        """
+        Enhanced OCR method with better image preprocessing
+        """
+        try:
+            print("[  INFO  ] Attempting enhanced OCR captcha solving...")
+
+            if not OCR_AVAILABLE:
+                print('[  WARN  ] Pillow or pytesseract not available; skip enhanced OCR')
+                return False
+
+            # Wait for iframe
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "register-captcha-iframe-1"))
+            )
+
+            # Switch to iframe
+            iframe = self.driver.find_element(By.ID, "register-captcha-iframe-1")
+            self.driver.switch_to.frame(iframe)
+            time.sleep(2)
+
+            # Get captcha image
+            captcha_img = self.driver.find_element(By.ID, "mtcap-image-1")
+
+            # Extract base64 from style attribute
+            style = captcha_img.get_attribute("style")
+            if "base64," in style:
+                base64_match = re.search(r'base64,([^"\']+)', style)
+                if base64_match:
+                    base64_data = base64_match.group(1)
+                    captcha_text = self._enhanced_ocr_captcha(base64_data)
+
+                    if captcha_text and len(captcha_text) >= 4:
+                        input_field = self.driver.find_element(By.ID, "mtcap-inputtext-1")
+                        input_field.clear()
+
+                        # Type slowly like human
+                        for char in captcha_text:
+                            input_field.send_keys(char)
+                            time.sleep(0.1)
+
+                        time.sleep(1)
+
+                        status_button = self.driver.find_element(By.ID, "mtcap-statusbutton-1")
+                        status_button.click()
+
+                        # Wait for verification
+                        time.sleep(3)
+
+                        # Check if verification was successful
+                        try:
+                            status_elem = self.driver.find_element(By.ID, "mtcap-status-1")
+                            if "success" in status_elem.get_attribute("class").lower():
+                                self.driver.switch_to.default_content()
+                                print(f"[   OK   ] Enhanced OCR solved: {captcha_text}")
+                                return True
+                        except:
+                            # If we can't check status, assume it worked
+                            self.driver.switch_to.default_content()
+                            print(f"[   OK   ] OCR submitted: {captcha_text}")
+                            return True
+
+            self.driver.switch_to.default_content()
+            print("[  WARN  ] Enhanced OCR failed")
+            return False
+
+        except Exception as e:
+            try:
+                self.driver.switch_to.default_content()
+            except:
+                pass
+            print(f"[  WARN  ] Enhanced OCR error: {str(e)}")
+            return False
+
+    def _enhanced_ocr_captcha(self, base64_data):
+        """
+        Enhanced OCR with multiple preprocessing techniques
+        """
+        try:
+            # Decode base64
+            img_data = base64.b64decode(base64_data)
+            img = Image.open(io.BytesIO(img_data))
+            
+            # Multiple preprocessing attempts
+            attempts = [
+                self._ocr_preprocess_attempt1,
+                self._ocr_preprocess_attempt2, 
+                self._ocr_preprocess_attempt3,
+                self._ocr_preprocess_attempt4
+            ]
+            
+            best_result = None
+            best_confidence = 0
+            
+            for attempt_func in attempts:
+                processed_img = attempt_func(img.copy())
+                text = self._ocr_with_confidence(processed_img)
+                
+                if text and len(text) >= 4:
+                    # Simple confidence check
+                    confidence = len(text)
+                    if any(c.isdigit() for c in text):
+                        confidence += 0.5
+                    if any(c.isupper() for c in text) and any(c.islower() for c in text):
+                        confidence += 0.5
+                        
+                    if confidence > best_confidence:
+                        best_confidence = confidence
+                        best_result = text
+            
+            return best_result if best_result else None
+            
+        except Exception as e:
+            print(f"[  WARN  ] Enhanced OCR processing failed: {str(e)}")
+            return None
+
+    def _ocr_preprocess_attempt1(self, img):
+        """Basic contrast enhancement"""
+        img = img.convert('L')  # Convert to grayscale
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(2.5)  # Increase contrast
+        enhancer = ImageEnhance.Sharpness(img)
+        img = enhancer.enhance(2.0)  # Increase sharpness
+        return img
+
+    def _ocr_preprocess_attempt2(self, img):
+        """Binarization with adaptive threshold"""
+        img = img.convert('L')
+        
+        # Simple thresholding
+        pixels = list(img.getdata())
+        threshold = sum(pixels) // len(pixels)  # Average brightness
+        
+        # Apply threshold
+        img = img.point(lambda p: 255 if p > threshold else 0)
+        
+        # Remove noise
+        img = img.filter(ImageFilter.MedianFilter(size=3))
+        return img
+
+    def _ocr_preprocess_attempt3(self, img):
+        """Edge enhancement"""
+        img = img.convert('L')
+        # Find edges using built-in filter
+        img = img.filter(ImageFilter.FIND_EDGES)
+        # Invert (edges become white on black background)
+        img = ImageOps.invert(img)
+        # Enhance contrast
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(3.0)
+        return img
+
+    def _ocr_preprocess_attempt4(self, img):
+        """Resize and clean"""
+        img = img.convert('L')
+        # Resize for better OCR (standardize size)
+        if img.size[0] < 200 or img.size[1] < 50:
+            img = img.resize((300, 100), Image.Resampling.LANCZOS)
+        # Clean with multiple filters
+        img = img.filter(ImageFilter.MedianFilter(size=3))
+        img = img.filter(ImageFilter.SHARPEN)
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(2.0)
+        return img
+
+    def _ocr_with_confidence(self, img):
+        """OCR with multiple configuration attempts"""
+        configs = [
+            r'--oem 3 --psm 8',
+            r'--oem 3 --psm 7', 
+            r'--oem 3 --psm 13',
+            r'--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
+            r'--oem 3 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+        ]
+        
+        for config in configs:
+            try:
+                text = pytesseract.image_to_string(img, config=config)
+                # Clean the text - remove non-alphanumeric characters
+                text = ''.join(filter(str.isalnum, text)).strip()
+                if text and len(text) >= 4 and len(text) <= 8:
+                    return text
+            except Exception as e:
+                continue
+        
+        return None
+
+    # ORPHANED FUNCTION - Nested duplicate definition, commented out
+    # # MODIFY your existing _enhanced_ocr_captcha to use the new method
+    #     def _enhanced_ocr_captcha(self, base64_data):
+    #         """
+    #         Enhanced OCR - Modified to avoid OpenCV completely
+    #         """
+    #         try:
+    #             # Use the OpenCV-free method instead
+    #             return self._enhanced_ocr_captcha_no_cv2(base64_data)
+    #             
+    #         except Exception as e:
+    #             print(f"[  WARN  ] Enhanced OCR processing failed: {str(e)}")
+    #             return None
+
+        
+    def solve_mtcaptcha_with_service_simple(self):
+        """
+        Solve MTCaptcha using 2Captcha service (or compatible) - improved version
+        - Use `TWO_CAPTCHA_API_KEY` from env if available
+        - Use page URL as `url` parameter (not iframe src)
+        - More robust result handling and verification
+        """
+        try:
+            from twocaptcha import TwoCaptcha
+            import os
+
+            api_key = os.environ.get('TWO_CAPTCHA_API_KEY', '7d9d06002654b3ec85914563bf420955')
+            if api_key == '7d9d06002654b3ec85914563bf420955':
+                print('[  WARN  ] Using fallback TwoCaptcha key; consider setting TWO_CAPTCHA_API_KEY environment variable')
+
+            solver = TwoCaptcha(api_key)
+
+            # Prefer main page URL when asking solver
+            page_url = self.driver.current_url
+
+            # Use site key for MTCaptcha
+            sitekey = 'MTPublic-JnEM38Q6U'
+
+            # Request solution
+            result = None
+            try:
+                result = solver.mtcaptcha(sitekey=sitekey, url=page_url)
+            except Exception:
+                # Some library versions expect different param names - try alternative call
+                try:
+                    result = solver.mtcaptcha(site_key=sitekey, page_url=page_url)
+                except Exception as e:
+                    raise
+
+            token = None
+            # TwoCaptcha wrappers may return different shapes - be defensive
+            if isinstance(result, dict):
+                token = result.get('code') or result.get('solution') or result.get('response')
+                if isinstance(token, dict):
+                    token = token.get('token') or token.get('code') or token.get('gRecaptchaResponse') or token.get('text')
+            elif isinstance(result, str):
+                token = result
+
+            if not token:
+                raise RuntimeError('2Captcha returned no token')
+
+            print(f"[  INFO  ] 2Captcha solution received")
+
+            # Switch to iframe and input the solution
+            iframe = self.driver.find_element(By.ID, "register-captcha-iframe-1")
+            self.driver.switch_to.frame(iframe)
+
+            input_field = self.driver.find_element(By.ID, "mtcap-inputtext-1")
+            input_field.clear()
+            for ch in token:
+                input_field.send_keys(ch)
+                time.sleep(0.06)
+            time.sleep(0.5)
+
+            # Click verify button
+            verify_button = self.driver.find_element(By.ID, "mtcap-statusbutton-1")
+            verify_button.click()
+
+            # Switch back to main content
+            self.driver.switch_to.default_content()
+
+            # Wait and verify token presence/status
+            for _ in range(10):
+                try:
+                    val = self.driver.execute_script("return (document.querySelector('[name=\'mtcaptcha-verifiedtoken\']')||{}).value || ''")
+                    if val and val.strip() != '':
+                        print('[   OK   ] MTCaptcha solved via 2Captcha')
+                        return True
+                except Exception:
+                    pass
+                time.sleep(1)
+
+            print('[  WARN  ] 2Captcha submitted but not verified yet')
+            return False
+
+        except Exception as e:
+            print(f"[  WARN  ] 2Captcha failed: {str(e)}")
+            try:
+                self.driver.switch_to.default_content()
+            except:
+                pass
+            return False
+    
+    # ORPHANED FUNCTION - Definition missing, only called but never defined
+    # def _enhanced_ocr_captcha_no_cv2(self, base64_data):
+    #     """
+    #     Missing implementation - this function is called but never defined
+    #     """
+    #     pass
+        
+    # ORPHANED FUNCTION - Never actually called
+    # def solve_mtcaptcha(self):
+    #     """
+    #     Automatically solve MTCaptcha by extracting and entering the text
+    #     """
+    #     try:
+    #         print("[  INFO  ] Attempting to solve MTCaptcha automatically...")
+    #         
+    #         # Wait for the iframe to be present
+    #         WebDriverWait(self.driver, 10).until(
+    #             EC.presence_of_element_located((By.ID, "register-captcha-iframe-1"))
+    #         )
+    #         
+    #         # Switch to the captcha iframe
+    #         iframe = self.driver.find_element(By.ID, "register-captcha-iframe-1")
+    #         self.driver.switch_to.frame(iframe)
+    #         
+    #         # Wait for the captcha image to load
+    #         time.sleep(2)
+    #         
+    #         # Get the captcha image element
+    #         captcha_img = self.driver.find_element(By.ID, "mtcap-image-1")
+    #         
+    #         # Extract the base64 image data from background-image style
+    #         style = captcha_img.get_attribute("style")
+    #         if "base64," in style:
+    #             # Extract base64 data
+    #             import re
+    #             base64_match = re.search(r'base64,([^"\']+)', style)
+    #             if base64_match:
+    #                 base64_data = base64_match.group(1)
+    #                 
+    #                 # Use OCR to read the captcha text
+    #                 captcha_text = self._ocr_captcha(base64_data)
+    #                 
+    #                 if captcha_text:
+    #                     # Find and fill the input field
+    #                     input_field = self.driver.find_element(By.ID, "mtcap-inputtext-1")
+    #                     input_field.clear()
+    #                     input_field.send_keys(captcha_text)
+    #                     time.sleep(1)
+    #                     
+    #                     # Click the status button to verify
+    #                     status_button = self.driver.find_element(By.ID, "mtcap-statusbutton-1")
+    #                     status_button.click()
+    #                     
+    #                     # Switch back to main content
+    #                     self.driver.switch_to.default_content()
+    #                     
+    #                     print(f"[   OK   ] MTCaptcha solved with text: {captcha_text}")
+    #                     return True
+    #         
+    #         # If automatic solving fails, switch back and let user solve manually
+    #         self.driver.switch_to.default_content()
+    #         print("[  WARN  ] Automatic captcha solving failed, please solve manually")
+    #         return False
+    #         
+    #     except Exception as e:
+    #         self.driver.switch_to.default_content()
+    #         print(f"[  WARN  ] Could not auto-solve captcha: {str(e)}")
+    #         return False
+    
+    # ORPHANED FUNCTION - Never actually called
+    # def _ocr_captcha(self, base64_data):
+    #     """
+    #     Use OCR to extract text from captcha image
+    #     """
+    #     try:
+    #         import base64
+    #         from PIL import Image
+    #         import io
+    #         import pytesseract
+    #         
+    #         # Decode base64 to image
+    #         img_data = base64.b64decode(base64_data)
+    #         img = Image.open(io.BytesIO(img_data))
+    #         
+    #         # Preprocess image for better OCR
+    #         img = img.convert('L')  # Convert to grayscale
+    #         
+    #         # Use Tesseract OCR
+    #         text = pytesseract.image_to_string(img, config='--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
+    #         
+    #         # Clean the text
+    #         text = ''.join(filter(str.isalnum, text))
+    #         
+    #         return text.strip()
+    #         
+    #     except ImportError:
+    #         print("[  WARN  ] pytesseract or Pillow not installed. Install with: pip install pytesseract Pillow")
+    #         return None
+    #     except Exception as e:
+    #         print(f"[  WARN  ] OCR failed: {str(e)}")
+    #         return None
+        
+    def refresh_until_easy_captcha(self, max_attempts=10):
+        """
+        Refresh captcha until an easily readable one appears or an automated solver succeeds.
+        Will attempt OCR, enhanced OCR, Capsolver and TwoCaptcha after each refresh.
+        """
+        for attempt in range(max_attempts):
+            try:
+                # Find refresh button and click it
+                refresh_btn = self.driver.find_element(By.CSS_SELECTOR, ".mtcaptcha-reload-button")
+                refresh_btn.click()
+                # random small wait to simulate human
+                time.sleep(1 + random.random() * 2)
+
+                # Try in-order: simple OCR -> enhanced -> capsolver -> 2captcha
+                if self.solve_mtcaptcha_simple_ocr():
+                    return True
+                if self.solve_mtcaptcha_enhanced_ocr():
+                    return True
+                if self.solve_with_capsolver_fixed():
+                    return True
+                if self.solve_mtcaptcha_with_service_simple():
+                    return True
+
+            except Exception as e:
+                # If refresh button isn't present, exit early
+                # but continue trying solvers directly
+                if hasattr(e, 'name'):
+                    pass
+                try:
+                    if self.solve_mtcaptcha_simple_ocr():
+                        return True
+                    if self.solve_mtcaptcha_enhanced_ocr():
+                        return True
+                    if self.solve_with_capsolver_fixed():
+                        return True
+                    if self.solve_mtcaptcha_with_service_simple():
+                        return True
+                except:
+                    pass
+
+        print("[  WARN  ] Could not find easy captcha after multiple refreshes or automated solvers failed")
+        return False
         
     def createAccount(self):
         exec_js = self.driver.execute_script
@@ -736,23 +1487,80 @@ class EsetProtectHubRegister(object):
         exec_js(f"return {GET_EBID}('country-select')").click()
         selected_country = 'Ukraine'
         logging.info('Selecting the country...')
-        for country in self.driver.find_elements('xpath', '//div[starts-with(@class, "select")]'):
-            if country.text == selected_country:
-                country.click()
-                logging.info('Country selected!')
-                break
+        # Find and click country dropdown
+        try:
+            # Wait for the select component to be present
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located(("id", "country-select"))
+            )
+    
+            # Find the input field inside the React Select
+            country_input = self.driver.find_element("id", "country-select-input")
+    
+            # Click to open the dropdown
+            country_input.click()
+            time.sleep(0.5)
+    
+            # Clear any existing value and type the country name
+            country_input.clear()
+            country_input.send_keys(selected_country)  # e.g., "Ukraine", "United States", etc.
+            time.sleep(0.5)
+    
+            # Press Enter to select the first matching option
+            country_input.send_keys(Keys.ENTER)
+            time.sleep(0.5)
+    
+            print(f"[   OK   ] Country '{selected_country}' selected successfully!")
+    
+        except Exception as e:
+            print(f"[ FAILED ] Could not select country: {str(e)}")
+            # Optionally, you can skip this step or use a default
+            pass
         exec_js(f'return {GET_EBID}("company-vat-input")').send_keys(dataGenerator(10, True))
         exec_js(f'return {GET_EBID}("company-crn-input")').send_keys(dataGenerator(10, True))
-        logging.warning('Solve the captcha on the page manually!!!')
-        console_log(f'\n{colorama.Fore.CYAN}Solve the captcha on the page manually!!!{colorama.Fore.RESET}', INFO, False, SILENT_MODE)
-        while True: # captcha
-            try:
-                mtcaptcha_solved_token = exec_js(f'return {GET_EBCN}("mtcaptcha-verifiedtoken")[0].value')
-                if mtcaptcha_solved_token.strip() != '':
-                    break
-            except Exception as E:
-                pass
-            time.sleep(1)
+
+        # After country selection, before the manual captcha prompt
+        # Allow override of solver order via environment variable CAPTCHA_SERVICE (capsolver|2captcha|ocr|auto)
+        import os
+        captcha_service = os.environ.get('CAPTCHA_SERVICE', 'auto').lower()
+
+        def try_order(order_list):
+            for name in order_list:
+                if name == 'ocr' and self.solve_mtcaptcha_simple_ocr():
+                    return True
+                if name == 'enhanced_ocr' and self.solve_mtcaptcha_enhanced_ocr():
+                    return True
+                if name == 'refresh' and self.refresh_until_easy_captcha():
+                    return True
+                if name == 'capsolver' and self.solve_with_capsolver_fixed():
+                    return True
+                if name == '2captcha' and self.solve_mtcaptcha_with_service_simple():
+                    return True
+            return False
+
+        if captcha_service == 'capsolver':
+            order = ['capsolver', '2captcha', 'refresh', 'enhanced_ocr', 'ocr']
+        elif captcha_service in ('2captcha', 'twocaptcha'):
+            order = ['2captcha', 'capsolver', 'refresh', 'enhanced_ocr', 'ocr']
+        elif captcha_service == 'ocr':
+            order = ['ocr', 'enhanced_ocr', 'refresh', 'capsolver', '2captcha']
+        else:  # auto
+            order = ['ocr', 'enhanced_ocr', 'refresh', 'capsolver', '2captcha']
+
+        solved = try_order(order)
+
+        # Final fallback to manual
+        if not solved:
+            logging.warning('Solve the captcha on the page manually!!!')
+            console_log(f'\n{colorama.Fore.CYAN}Solve the captcha on the page manually!!!{colorama.Fore.RESET}', INFO, False, SILENT_MODE)
+            while True: # captcha
+                try:
+                    mtcaptcha_solved_token = exec_js(f'return {GET_EBCN}("mtcaptcha-verifiedtoken")[0].value')
+                    if mtcaptcha_solved_token.strip() != '':
+                        break
+                except Exception as E:
+                    pass
+                time.sleep(1)
         exec_js(f'return {GET_EBID}("continue").click()')
         try:
             uCE(self.driver, f'return {GET_EBID}("registration-email-sent").innerText === "We sent you a verification email"', max_iter=10)

@@ -146,6 +146,57 @@ PROXY_ERROR_COUNTER = 0
 PROXY_ERROR_COUNTER_LIMIT = 3
 CHROME_PROXY_EXTENSION_PATH = ""
 
+# Add these functions for proxy management
+def get_free_proxies():
+    """Get list of free HTTP proxies"""
+    try:
+        response = requests.get('https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all', timeout=10)
+        proxies = response.text.split('\r\n')
+        return [p for p in proxies if p]  # Filter empty lines
+    except:
+        print("[  WARN  ] Could not fetch free proxies, using fallback list")
+        return ['http://proxy1:8080', 'http://proxy2:8080']  # Fallback
+
+def create_account_with_proxy_rotation(email_obj, password, browser_name, webdriver_path, custom_browser_location):
+    """Try creating account with different proxies"""
+    global PROXIES, PROXY_COUNTER
+    
+    # If no proxies in file, try to get free ones
+    if not PROXIES:
+        free_proxies = get_free_proxies()
+        PROXIES = free_proxies
+        PROXIES_LEN = len(PROXIES)
+        if PROXIES:
+            print(f"[  INFO  ] Found {PROXIES_LEN} free proxies")
+    
+    for i, proxy in enumerate(PROXIES):
+        try:
+            PROXY_COUNTER = i + 1
+            print(f"[  INFO  ] Trying proxy {PROXY_COUNTER}/{PROXIES_LEN}: {proxy}")
+            
+            # Setup driver with proxy
+            driver = ER.setup_driver_with_proxy(proxy)
+            
+            eset_register = ER(email_obj, password, driver)
+            result = eset_register.createAccount()
+            
+            if result:
+                print(f"[   OK   ] Success with proxy: {proxy}")
+                return driver, eset_register
+                
+        except IPBlockedException:
+            print(f"[  WARN  ] Proxy {proxy} blocked, trying next...")
+            if hasattr(locals().get('driver'), 'quit'):
+                driver.quit()
+            continue
+        except Exception as e:
+            print(f"[  WARN  ] Error with proxy {proxy}: {str(e)}")
+            if hasattr(locals().get('driver'), 'quit'):
+                driver.quit()
+            continue
+    
+    raise IPBlockedException("All proxies failed! Try again later.")
+
 class MBCIConfigManager:
     def __init__(self, path=CONFIG_PATH):
         self.path = path
@@ -500,7 +551,11 @@ def main(disable_exit=False):
         if not args['skip_webdriver_menu']: # updating or installing webdriver
             webdriver_path, custom_browser_location = webdriver_installer.menu(args['disable_progress_bar'])
         if not args['only_webdriver_update']:
-            DRIVER = initSeleniumWebDriver(browser_name, webdriver_path, custom_browser_location, CHROME_PROXY_EXTENSION_PATH, (not args['no_headless']))
+            # Use proxy rotation if proxies are available
+            if PROXIES and browser_name == GOOGLE_CHROME:
+                DRIVER = create_account_with_proxy_rotation(email_obj, e_passwd, browser_name, webdriver_path, custom_browser_location)[0]
+            else:
+                DRIVER = initSeleniumWebDriver(browser_name, webdriver_path, custom_browser_location, CHROME_PROXY_EXTENSION_PATH, (not args['no_headless']))
             if DRIVER is None:
                 raise RuntimeError(f'{browser_name} initialization error!')
             if PROXIES != []:

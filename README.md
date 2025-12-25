@@ -46,6 +46,12 @@ My [public channel with archives of my projects](https://t.me/rzc0d3r_official)
 - **Almost all Email APIs have been blocked by ESET!!!** Recommended to use ```emailfake```, ```inboxes``` and also use the ```--custom-email-api``` argument!
 - **ESET** has removed the trial version for VPN, it is now **fully paid**. The ```--vpn-codes``` argument does not work now!
 - ```mailticking```, ```incognitomail``` added **cloudflare** captcha
+
+Captcha automation helpers:
+- Set environment variable `CAPSOLVER_API_KEY` (preferred, proxyless CapSolver) or `TWO_CAPTCHA_API_KEY` for 2Captcha.
+- The code will attempt OCR first, then Capsolver (proxyless), then 2Captcha, with retries and improved injection logic.
+- If you're still experiencing manual captcha prompts, try running a headful browser and rotating IPs (proxies).
+
 - **ACT0**, **ACT5** errors may occur during activation in some cases
 - **ecp4125** activation error has been reported by some users
 - **ESET ProtectHub** has an aggressive policy for temporary email addresses!
