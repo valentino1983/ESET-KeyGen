@@ -109,7 +109,7 @@ jobs:
           fi
 
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.vars.outputs.branch }}
 
@@ -313,7 +313,7 @@ jobs:
 
       - name: Upload Generated Files
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eset-keys-${{ github.run_number }}
           path: |
@@ -323,7 +323,7 @@ jobs:
 
       - name: Upload Debug Artifacts
         if: always() && steps.vars.outputs.generate_debug_artifacts == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eset-debug-${{ github.run_number }}
           path: |
